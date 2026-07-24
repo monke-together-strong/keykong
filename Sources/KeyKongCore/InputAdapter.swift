@@ -1,7 +1,10 @@
 import Foundation
 
 public protocol InputAdapter {
-    func collectInput(for request: InputRequest) -> InputOutcome
+    func collectInput(
+        for request: InputRequest,
+        deadline: RequestDeadline
+    ) -> InputOutcome
 }
 
 public enum InputOutcome: Equatable, Sendable {

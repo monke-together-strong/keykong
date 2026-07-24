@@ -1,41 +1,56 @@
+import Darwin
 import Foundation
 
+public struct DeliveryTargetIdentity: Codable, Equatable, Sendable {
+    public let device: UInt64
+    public let inode: UInt64
+
+    init(device: UInt64, inode: UInt64) {
+        self.device = device
+        self.inode = inode
+    }
+}
+
 struct DeliveryExecutor: DeliveryExecuting {
-    static func validateTargets(_ deliveries: [Delivery]) throws {
+    static func validateTargets(
+        _ deliveries: [Delivery]
+    ) throws -> [String: DeliveryTargetIdentity] {
         var simulatedTargets: [String: Data] = [:]
+        var identitiesByPath: [String: DeliveryTargetIdentity] = [:]
+        var expectedTargets: [String: DeliveryTargetIdentity] = [:]
 
         for delivery in deliveries {
             try validateMetadata(delivery)
 
-            var target = try simulatedTargets[delivery.path]
-                ?? readTarget(delivery)
+            let identity: DeliveryTargetIdentity
+            var target: Data
+            if let simulatedTarget = simulatedTargets[delivery.path],
+               let knownIdentity = identitiesByPath[delivery.path] {
+                target = simulatedTarget
+                identity = knownIdentity
+            } else {
+                let openedTarget = try OpenedDeliveryTarget(
+                    path: delivery.path
+                )
+                target = try openedTarget.read()
+                identity = openedTarget.identity
+                identitiesByPath[delivery.path] = identity
+            }
+
             let template = try FieldTemplate(delivery.template)
             let rendered = Data(template.validationRendering.utf8)
             try apply(delivery, rendered: rendered, to: &target)
             simulatedTargets[delivery.path] = target
+            expectedTargets[delivery.id] = identity
         }
+
+        return expectedTargets
     }
 
     private static func validateMetadata(_ delivery: Delivery) throws {
         guard delivery.path.hasPrefix("/") else {
             throw ValidationError(
                 "delivery '\(delivery.id)' path must be absolute"
-            )
-        }
-
-        let attributes = try? FileManager.default.attributesOfItem(
-            atPath: delivery.path
-        )
-        guard attributes?[.type] as? FileAttributeType == .typeRegular else {
-            throw ValidationError(
-                "delivery '\(delivery.id)' target must be an existing regular file"
-            )
-        }
-        guard FileManager.default.isReadableFile(atPath: delivery.path),
-              FileManager.default.isWritableFile(atPath: delivery.path)
-        else {
-            throw ValidationError(
-                "delivery '\(delivery.id)' target must be readable and writable"
             )
         }
 
@@ -58,27 +73,40 @@ struct DeliveryExecutor: DeliveryExecuting {
 
     func execute(
         _ deliveries: [Delivery],
-        values: [String: ResponseValue]
+        values: [String: ResponseValue],
+        expectedTargets: [String: DeliveryTargetIdentity],
+        deadline: RequestDeadline
     ) -> [String] {
         var failedDeliveryIDs: [String] = []
 
         for delivery in deliveries {
+            guard !deadline.isExpired else { break }
             do {
+                guard let expectedTarget = expectedTargets[delivery.id] else {
+                    throw ValidationError(
+                        "delivery '\(delivery.id)' target identity is unavailable"
+                    )
+                }
+                let openedTarget = try OpenedDeliveryTarget(
+                    path: delivery.path
+                )
+                guard openedTarget.identity == expectedTarget else {
+                    throw ValidationError(
+                        "delivery '\(delivery.id)' target changed"
+                    )
+                }
+
                 let template = try FieldTemplate(delivery.template)
                 let rendered = Data(try template.render(values: values).utf8)
-                var target = try Self.readTarget(delivery)
+                var target = try openedTarget.read()
                 try Self.apply(delivery, rendered: rendered, to: &target)
-                try target.write(to: URL(fileURLWithPath: delivery.path))
+                try openedTarget.replace(with: target)
             } catch {
                 failedDeliveryIDs.append(delivery.id)
             }
         }
 
         return failedDeliveryIDs
-    }
-
-    private static func readTarget(_ delivery: Delivery) throws -> Data {
-        try Data(contentsOf: URL(fileURLWithPath: delivery.path))
     }
 
     private static func apply(
@@ -118,5 +146,86 @@ struct DeliveryExecutor: DeliveryExecuting {
             }
         }
         return nil
+    }
+}
+
+private final class OpenedDeliveryTarget {
+    let identity: DeliveryTargetIdentity
+    private let descriptor: Int32
+
+    init(path: String) throws {
+        descriptor = open(path, O_RDWR | O_CLOEXEC | O_NOFOLLOW)
+        guard descriptor >= 0 else {
+            throw ValidationError(
+                "delivery target must be an existing readable and writable regular file"
+            )
+        }
+
+        var information = stat()
+        guard fstat(descriptor, &information) == 0,
+              information.st_mode & S_IFMT == S_IFREG
+        else {
+            close(descriptor)
+            throw ValidationError(
+                "delivery target must be an existing readable and writable regular file"
+            )
+        }
+        identity = DeliveryTargetIdentity(
+            device: UInt64(information.st_dev),
+            inode: UInt64(information.st_ino)
+        )
+    }
+
+    deinit {
+        close(descriptor)
+    }
+
+    func read() throws -> Data {
+        guard lseek(descriptor, 0, SEEK_SET) >= 0 else {
+            throw ValidationError("delivery target could not be read")
+        }
+
+        var result = Data()
+        var buffer = [UInt8](repeating: 0, count: 16 * 1024)
+        while true {
+            let count = buffer.withUnsafeMutableBytes {
+                Darwin.read(descriptor, $0.baseAddress, $0.count)
+            }
+            if count > 0 {
+                result.append(contentsOf: buffer.prefix(count))
+            } else if count == 0 {
+                return result
+            } else if errno != EINTR {
+                throw ValidationError("delivery target could not be read")
+            }
+        }
+    }
+
+    func replace(with data: Data) throws {
+        guard ftruncate(descriptor, 0) == 0,
+              lseek(descriptor, 0, SEEK_SET) >= 0
+        else {
+            throw ValidationError("delivery target could not be written")
+        }
+
+        try data.withUnsafeBytes { bytes in
+            var offset = 0
+            while offset < bytes.count {
+                let count = Darwin.write(
+                    descriptor,
+                    bytes.baseAddress?.advanced(by: offset),
+                    bytes.count - offset
+                )
+                if count > 0 {
+                    offset += count
+                } else if count < 0, errno == EINTR {
+                    continue
+                } else {
+                    throw ValidationError(
+                        "delivery target could not be written"
+                    )
+                }
+            }
+        }
     }
 }

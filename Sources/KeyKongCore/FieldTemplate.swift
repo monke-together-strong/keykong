@@ -51,12 +51,18 @@ struct FieldTemplate {
 
     func render(values: [String: ResponseValue]) throws -> String {
         try render { fieldID in
-            guard case let .text(value)? = values[fieldID] else {
+            guard let value = values[fieldID] else {
                 throw ValidationError(
                     "delivery template value for field '\(fieldID)' is unavailable"
                 )
             }
-            return value
+            switch value {
+            case let .text(text):
+                return text
+            case let .selection(selected):
+                let data = try JSONEncoder().encode(selected)
+                return String(decoding: data, as: UTF8.self)
+            }
         }
     }
 

@@ -26,7 +26,11 @@ public struct KeyKongCommand {
         self.deliveryExecutor = deliveryExecutor
     }
 
-    public func run(arguments: [String], standardInput: Data = Data()) -> CLIExecution {
+    public func run(
+        arguments: [String],
+        standardInput: Data = Data(),
+        deadline: RequestDeadline = RequestDeadline(timeout: 10 * 60)
+    ) -> CLIExecution {
         guard arguments.count == 3,
               arguments[0] == "request",
               arguments[1] == "--request"
@@ -35,12 +39,16 @@ public struct KeyKongCommand {
         }
 
         do {
+            try requireTimeRemaining(deadline)
             let requestData = try readRequest(arguments[2], standardInput: standardInput)
+            try requireTimeRemaining(deadline)
             let request = try JSONDecoder().decode(InputRequest.self, from: requestData)
-            try RequestValidator.validate(request)
+            let expectedTargets = try RequestValidator.validate(request)
+            try requireTimeRemaining(deadline)
 
-            switch adapter.collectInput(for: request) {
+            switch adapter.collectInput(for: request, deadline: deadline) {
             case let .submitted(values):
+                try requireTimeRemaining(deadline)
                 let validated = try SubmissionValidator.validate(values, for: request)
                 let responseValues = validated.filter { fieldID, _ in
                     request.fields.first { $0.id == fieldID }?.type != .secret
@@ -49,8 +57,13 @@ public struct KeyKongCommand {
                 do {
                     failedDeliveryIDs = try deliveryExecutor.execute(
                         request.deliveries,
-                        values: validated
+                        values: validated,
+                        expectedTargets: expectedTargets,
+                        deadline: deadline
                     )
+                    try requireTimeRemaining(deadline)
+                } catch RequestTimeoutError.expired {
+                    return result(status: .expired, values: [:])
                 } catch {
                     return result(
                         status: .failed,
@@ -76,11 +89,17 @@ public struct KeyKongCommand {
                     diagnostic: "some deliveries failed"
                 )
             case .cancelled:
+                try requireTimeRemaining(deadline)
                 return result(status: .cancelled, values: [:], exitCode: 1)
             case .expired:
                 return result(status: .expired, values: [:], exitCode: 1)
             }
+        } catch RequestTimeoutError.expired {
+            return result(status: .expired, values: [:], exitCode: 1)
         } catch {
+            if deadline.isExpired {
+                return result(status: .expired, values: [:], exitCode: 1)
+            }
             return failure("request failed: \(error.localizedDescription)")
         }
     }
@@ -90,6 +109,12 @@ public struct KeyKongCommand {
             return standardInput
         }
         return try Data(contentsOf: URL(fileURLWithPath: source))
+    }
+
+    private func requireTimeRemaining(_ deadline: RequestDeadline) throws {
+        guard !deadline.isExpired else {
+            throw RequestTimeoutError.expired
+        }
     }
 
     private func result(

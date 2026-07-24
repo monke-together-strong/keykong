@@ -1,7 +1,9 @@
 import Foundation
 
 enum RequestValidator {
-    static func validate(_ request: InputRequest) throws {
+    static func validate(
+        _ request: InputRequest
+    ) throws -> [String: DeliveryTargetIdentity] {
         guard Validation.isValidID(request.id) else {
             throw ValidationError("request ID is invalid")
         }
@@ -21,7 +23,10 @@ enum RequestValidator {
             try validate(field)
         }
 
-        try validateDeliveries(request.deliveries, fields: request.fields)
+        return try validateDeliveries(
+            request.deliveries,
+            fields: request.fields
+        )
     }
 
     private static func validate(_ field: InputField) throws {
@@ -69,7 +74,7 @@ enum RequestValidator {
     private static func validateDeliveries(
         _ deliveries: [Delivery],
         fields: [InputField]
-    ) throws {
+    ) throws -> [String: DeliveryTargetIdentity] {
         let deliveryIDs = deliveries.map(\.id)
         guard Set(deliveryIDs).count == deliveryIDs.count else {
             throw ValidationError("delivery IDs must be unique")
@@ -91,14 +96,9 @@ enum RequestValidator {
             }
 
             for fieldID in template.references {
-                guard let field = fieldsByID[fieldID] else {
+                guard fieldsByID[fieldID] != nil else {
                     throw ValidationError(
                         "delivery '\(delivery.id)' references unknown field '\(fieldID)'"
-                    )
-                }
-                guard field.type != .multiSelect else {
-                    throw ValidationError(
-                        "delivery '\(delivery.id)' cannot reference multi-select field '\(fieldID)'"
                     )
                 }
                 referencedFieldIDs.insert(fieldID)
@@ -113,6 +113,6 @@ enum RequestValidator {
             }
         }
 
-        try DeliveryExecutor.validateTargets(deliveries)
+        return try DeliveryExecutor.validateTargets(deliveries)
     }
 }

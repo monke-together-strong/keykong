@@ -102,8 +102,9 @@ returned, and `failedDeliveries` contains only the failed delivery IDs:
 
 When all deliveries fail, the status is `failed` and `failedDeliveries` is
 omitted. Validation and worker failures also return `failed`. Cancellation and
-the ten-minute request timeout return `cancelled` and `expired`, respectively,
-with empty `values`.
+the ten-minute whole-request timeout return `cancelled` and `expired`,
+respectively, with empty `values`. The timeout starts before Key Kong reads the
+request and also bounds the dialog and delivery worker.
 
 Delivery IDs are stable. Every target must be an existing readable and writable
 regular file at an absolute path. An `insert_line` delivery inserts the rendered
@@ -115,6 +116,8 @@ Delivery writes run in a child process, which inherits the CLI caller's
 operating-system sandbox and permissions.
 
 Templates perform only `{{ field_id }}` substitution. Template field references
-must exist, secret fields must be referenced by at least one delivery, and
-multi-select fields cannot be used in templates. Key Kong validates fields,
-templates, delivery IDs, paths, and insertion lines before opening the dialog.
+must exist, and secret fields must be referenced by at least one delivery.
+Text and single-select fields render as their submitted value. Multi-select
+fields render as a compact JSON array of option values, preserving request
+order, such as `["api","web"]`. Key Kong validates fields, templates, delivery
+IDs, paths, and insertion lines before opening the dialog.
