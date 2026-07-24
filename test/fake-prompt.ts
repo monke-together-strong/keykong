@@ -4,6 +4,8 @@ export {};
 
 const marker = process.env.KEY_KONG_FAKE_MARKER;
 if (marker) await Bun.write(marker, "launched");
+const pidMarker = process.env.KEY_KONG_FAKE_PID_MARKER;
+if (pidMarker) await Bun.write(pidMarker, String(process.pid));
 
 const request = JSON.parse(await Bun.stdin.text());
 if (
@@ -57,11 +59,39 @@ if (
 }
 
 switch (process.env.KEY_KONG_FAKE_MODE) {
+  case "block":
+    await new Promise(() => {});
+    break;
+  case "late":
+    await Bun.sleep(500);
   case "cancel":
     console.log('{"status":"cancelled"}');
     break;
   case "malformed":
-    console.log("not-json");
+    console.log("raw-native-secret");
+    break;
+  case "extra":
+    console.log('{"status":"cancelled"}\nraw-native-secret');
+    break;
+  case "eof":
+    break;
+  case "nonzero":
+    console.error("raw-native-secret");
+    process.exit(9);
+  case "crash":
+    process.kill(process.pid, "SIGKILL");
+    break;
+  case "large":
+    console.log(
+      JSON.stringify({
+        status: "submitted",
+        values: {
+          environment: "x".repeat(1024 * 1024),
+          region: "us-west-2",
+          features: ["audit", "alerts"],
+        },
+      }),
+    );
     break;
   case "replace_last": {
     const target = request.deliveries.at(-1).path;

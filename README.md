@@ -2,9 +2,8 @@
 
 A secure, blocking input broker for agent skills and manual workflows.
 
-The current migration slice targets macOS and adds a one-shot Bun CLI with a
-private native AppKit Prompt Adapter. The established Swift CLI remains
-available as a fallback while the Bun path expands.
+The macOS distribution is a one-shot Bun CLI with a private native AppKit
+Prompt Adapter.
 
 ## Build and run
 
@@ -16,17 +15,16 @@ bun run test
 bun run test:swift
 ```
 
-Build the Bun CLI and its private helper layout in `dist/`, or build the legacy
-Swift CLI fallback:
+Build and sign the self-contained macOS layout in `dist/`:
 
 ```sh
-bun run build
-bun run build:helper
-bun run build:legacy
+bun run package:macos
 ```
 
 The public Bun executable is `dist/bin/key-kong`, and its compatible private
-helper is `dist/libexec/key-kong-prompt`.
+helper is `dist/libexec/key-kong-prompt`. Packaging uses an ad-hoc signature by
+default. Set `KEY_KONG_SIGNING_IDENTITY` to a signing identity for release
+artifacts; both executables are verified after signing.
 
 Submit a versioned JSON request from a file or explicit standard input:
 
@@ -45,8 +43,9 @@ absolute-path files.
 
 ## Architecture
 
-Bun owns request decoding, validation, prompt projection, submission validation,
-template rendering, filesystem delivery, result shaping, and exit behavior. The
+Bun owns the ten-minute whole-request deadline, request decoding, validation,
+prompt projection, submission validation, template rendering, filesystem
+delivery, result shaping, and exit behavior. The
 Swift executable receives presentation-only JSON on standard input and returns
 one submission or cancellation JSON object on standard output. It sees
 sanitized delivery paths, operations, and insertion lines, but never templates

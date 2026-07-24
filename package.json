@@ -7,7 +7,7 @@
     "build": "bun build --compile --define KEY_KONG_TESTING=false --outfile dist/bin/key-kong src/main.ts",
     "build:test": "bun build --compile --define KEY_KONG_TESTING=true --outfile dist/bin/key-kong src/main.ts",
     "build:helper": "swift build --package-path native/macos -c release --product key-kong-prompt && mkdir -p dist/libexec && cp native/macos/.build/release/key-kong-prompt dist/libexec/key-kong-prompt",
-    "build:legacy": "swift build --package-path native/macos --product key-kong",
+    "package:macos": "sh scripts/package-macos.sh",
     "check": "bunx tsc --noEmit",
     "test": "bun run build:test && bun test",
     "test:swift": "swift test --package-path native/macos"

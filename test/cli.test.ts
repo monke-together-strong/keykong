@@ -98,7 +98,15 @@ function withDeliveries(
 
 function run(
   args: string[],
-  options: { stdin?: string; mode?: string; marker?: string } = {},
+  options: {
+    stdin?: string;
+    mode?: string;
+    marker?: string;
+    pidMarker?: string;
+    deadlineMS?: number;
+    blockWriteMS?: number;
+    internalFailure?: boolean;
+  } = {},
 ) {
   const process = Bun.spawnSync([cli, ...args], {
     stdin: options.stdin
@@ -111,6 +119,18 @@ function run(
       KEY_KONG_PROMPT_EXECUTABLE: fakePrompt,
       KEY_KONG_FAKE_MODE: options.mode ?? "submit",
       ...(options.marker ? { KEY_KONG_FAKE_MARKER: options.marker } : {}),
+      ...(options.pidMarker
+        ? { KEY_KONG_FAKE_PID_MARKER: options.pidMarker }
+        : {}),
+      ...(options.deadlineMS
+        ? { KEY_KONG_TEST_DEADLINE_MS: String(options.deadlineMS) }
+        : {}),
+      ...(options.blockWriteMS
+        ? { KEY_KONG_TEST_BLOCK_WRITE_MS: String(options.blockWriteMS) }
+        : {}),
+      ...(options.internalFailure
+        ? { KEY_KONG_TEST_INTERNAL_FAILURE: "1" }
+        : {}),
     },
   });
   return {
@@ -178,6 +198,34 @@ describe("built CLI response request", () => {
 
     expect(result.code).toBe(1);
     expect(result.stdout).toBe('{"status":"cancelled","values":{}}\n');
+  });
+
+  test("a blocked helper is terminated at the whole-request deadline", async () => {
+    const pidMarker = join(directory, "blocked-helper.pid");
+    const started = performance.now();
+    const result = run(["request", "-"], {
+      stdin: request(),
+      mode: "block",
+      deadlineMS: 100,
+      pidMarker,
+    });
+
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe('{"status":"expired","values":{}}\n');
+    const helperPID = Number(await readFile(pidMarker, "utf8"));
+    expect(() => process.kill(helperPID, 0)).toThrow();
+  });
+
+  test("a late helper response is discarded after expiry", () => {
+    const result = run(["request", "-"], {
+      stdin: request(),
+      mode: "late",
+      deadlineMS: 100,
+    });
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe('{"status":"expired","values":{}}\n');
   });
 
   test("invalid response request is rejected before launching the helper", async () => {
@@ -440,6 +488,86 @@ describe("built CLI response request", () => {
     expect(result.stdout).not.toContain("not-json");
   });
 
+  test("native helper faults return sanitized prompt failures", () => {
+    for (const mode of ["malformed", "extra", "eof", "nonzero", "crash"]) {
+      const result = run(["request", "-"], { stdin: request(), mode });
+
+      expect(result.code).toBe(1);
+      expect(JSON.parse(result.stdout).error).toEqual({
+        code: "PROMPT_FAILED",
+        message: "native prompt returned an invalid response",
+      });
+      expect(result.stdout + result.stderr).not.toContain("raw-native-secret");
+    }
+  });
+
+  test("deadline covers blocked request input", async () => {
+    const child = Bun.spawn([cli, "request", "-"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...Bun.env,
+        KEY_KONG_PROMPT_EXECUTABLE: fakePrompt,
+        KEY_KONG_TEST_DEADLINE_MS: "100",
+      },
+    });
+
+    expect(await child.exited).toBe(1);
+    expect(await new Response(child.stdout).text()).toBe(
+      '{"status":"expired","values":{}}\n',
+    );
+  });
+
+  test("deadline covers delivery work", async () => {
+    const target = join(directory, "blocked-delivery.txt");
+    await writeFile(target, "");
+    const result = run(["request", "-"], {
+      stdin: deliveryRequest(target),
+      deadlineMS: 100,
+      blockWriteMS: 200,
+    });
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe('{"status":"expired","values":{}}\n');
+    await Bun.sleep(250);
+    expect(await readFile(target, "utf8")).toBe("");
+  });
+
+  test("blocked caller output cannot extend the process deadline", async () => {
+    const child = Bun.spawn([cli, "request", "-"], {
+      stdin: new TextEncoder().encode(request()),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...Bun.env,
+        KEY_KONG_PROMPT_EXECUTABLE: fakePrompt,
+        KEY_KONG_FAKE_MODE: "large",
+        KEY_KONG_TEST_DEADLINE_MS: "300",
+      },
+    });
+
+    const exitCode = await Promise.race([
+      child.exited,
+      Bun.sleep(1_000).then(() => -1),
+    ]);
+    if (exitCode === -1) child.kill();
+    expect(exitCode).not.toBe(-1);
+  });
+
+  test("unexpected failures use the stable internal error category", () => {
+    const result = run(["request", "-"], {
+      stdin: request(),
+      internalFailure: true,
+    });
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout).error).toEqual({
+      code: "INTERNAL_FAILURE",
+      message: "unexpected internal failure",
+    });
+  });
+
   test("production build ignores the test helper environment override", async () => {
     const layout = join(directory, "production");
     const bin = join(layout, "bin");
@@ -478,26 +606,16 @@ printf '%s\\n' '{"status":"submitted","values":{"environment":"prod","region":"u
       stdin: new TextEncoder().encode(request()),
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...Bun.env, KEY_KONG_PROMPT_EXECUTABLE: overrideHelper },
+      env: {
+        ...Bun.env,
+        KEY_KONG_PROMPT_EXECUTABLE: overrideHelper,
+        KEY_KONG_TEST_INTERNAL_FAILURE: "1",
+        KEY_KONG_TEST_DEADLINE_MS: "1",
+      },
     });
 
     expect(result.exitCode).toBe(0);
     expect(JSON.parse(result.stdout.toString()).status).toBe("completed");
   });
 
-  test("legacy Swift CLI remains buildable as a migration fallback", () => {
-    const result = Bun.spawnSync(
-      [
-        "swift",
-        "build",
-        "--package-path",
-        join(root, "native/macos"),
-        "--product",
-        "key-kong",
-      ],
-      { stdout: "pipe", stderr: "pipe" },
-    );
-
-    expect(result.exitCode).toBe(0);
-  });
 });

@@ -26,7 +26,25 @@ defer {
 do {
     let input = FileHandle.standardInput.readDataToEndOfFile()
     let request = try JSONDecoder().decode(PromptRequest.self, from: input)
-    let outcome = PromptRunner.run(request)
+    let outcome: PromptOutcome
+    if ProcessInfo.processInfo.environment["KEY_KONG_PACKAGE_SMOKE"] == "1" {
+        outcome = .submitted(
+            Dictionary(uniqueKeysWithValues: request.fields.map { field in
+                let value: ResponseValue
+                switch field.type {
+                case .text, .secret:
+                    value = .text("package-smoke")
+                case .select:
+                    value = .text(field.options!.first!.value)
+                case .multiSelect:
+                    value = .selection([field.options!.first!.value])
+                }
+                return (field.id, value)
+            })
+        )
+    } else {
+        outcome = PromptRunner.run(request)
+    }
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     FileHandle.standardOutput.write(try encoder.encode(outcome) + Data([0x0A]))

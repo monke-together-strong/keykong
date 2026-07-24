@@ -43,10 +43,11 @@ export type ErrorCode =
   | "CLI_USAGE"
   | "INVALID_REQUEST"
   | "PROMPT_FAILED"
-  | "DELIVERY_FAILED";
+  | "DELIVERY_FAILED"
+  | "INTERNAL_FAILURE";
 
 export interface Result {
-  status: "completed" | "partial" | "failed" | "cancelled";
+  status: "completed" | "partial" | "failed" | "cancelled" | "expired";
   values: Record<string, ResponseValue>;
   failedDeliveries?: string[];
   error?: { code: ErrorCode; message: string };

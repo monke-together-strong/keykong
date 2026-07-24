@@ -1,8 +1,11 @@
 import { KeyKongError } from "./errors";
+import { DeadlineExpired, type Deadline } from "./deadline";
 import { deliver } from "./delivery";
 import { prompt } from "./prompt";
 import type { Result } from "./types";
 import { validateRequest, validateSubmission } from "./validation";
+
+declare const KEY_KONG_TESTING: boolean;
 
 export interface Execution {
   result: Result;
@@ -13,17 +16,23 @@ function usage(): never {
   throw new KeyKongError("CLI_USAGE", "usage: key-kong request <file|->", 2);
 }
 
-async function readRequest(source: string): Promise<string> {
+async function readRequest(source: string, deadline: Deadline): Promise<string> {
   try {
-    return await (source === "-" ? Bun.stdin.text() : Bun.file(source).text());
-  } catch {
+    return await deadline.run(
+      source === "-" ? Bun.stdin.text() : Bun.file(source).text(),
+    );
+  } catch (error) {
+    if (error instanceof DeadlineExpired) throw error;
     throw new KeyKongError("INVALID_REQUEST", "request could not be read", 2);
   }
 }
 
-export async function requestCommand(args: string[]): Promise<Execution> {
+export async function requestCommand(
+  args: string[],
+  deadline: Deadline,
+): Promise<Execution> {
   if (args.length !== 2 || args[0] !== "request") usage();
-  const text = await readRequest(args[1]!);
+  const text = await readRequest(args[1]!, deadline);
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -31,8 +40,11 @@ export async function requestCommand(args: string[]): Promise<Execution> {
     throw new KeyKongError("INVALID_REQUEST", "request is not valid JSON", 2);
   }
 
-  const { request, targets } = await validateRequest(raw);
-  const response = await prompt(request);
+  const { request, targets } = await deadline.run(validateRequest(raw));
+  if (KEY_KONG_TESTING && process.env.KEY_KONG_TEST_INTERNAL_FAILURE) {
+    throw new Error("forced internal failure");
+  }
+  const response = await prompt(request, deadline);
   if (response.status === "cancelled") {
     return { result: { status: "cancelled", values: {} }, exitCode: 1 };
   }
@@ -46,7 +58,7 @@ export async function requestCommand(args: string[]): Promise<Execution> {
       .filter((field) => field.type !== "secret")
       .map((field) => [field.id, values[field.id]!]),
   );
-  const failed = await deliver(request.deliveries, values, targets);
+  const failed = await deliver(request.deliveries, values, targets, deadline);
   for (const field of request.fields) delete values[field.id];
 
   if (failed.length === 0) {

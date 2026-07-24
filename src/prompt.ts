@@ -1,4 +1,5 @@
 import { dirname, resolve } from "node:path";
+import { DeadlineExpired, type Deadline } from "./deadline";
 import { KeyKongError } from "./errors";
 import type { PromptRequest, PromptResponse, Request } from "./types";
 
@@ -11,7 +12,10 @@ function helperPath(): string {
   return resolve(dirname(process.execPath), "../libexec/key-kong-prompt");
 }
 
-export async function prompt(request: Request): Promise<PromptResponse> {
+export async function prompt(
+  request: Request,
+  deadline: Deadline,
+): Promise<PromptResponse> {
   const projected: PromptRequest = {
     title: request.title,
     fields: request.fields,
@@ -41,11 +45,12 @@ export async function prompt(request: Request): Promise<PromptResponse> {
     const input = subprocess.stdin as import("bun").FileSink;
     input.write(JSON.stringify(projected));
     input.end();
-    const output = await new Response(
-      subprocess.stdout as ReadableStream<Uint8Array>,
-    ).text();
-    const exitCode = await subprocess.exited;
-    if (exitCode !== 0) throw new Error();
+    const output = await deadline.run(
+      new Response(
+        subprocess.stdout as ReadableStream<Uint8Array>,
+      ).text(),
+      () => subprocess.kill(),
+    );
 
     const response: unknown = JSON.parse(output);
     if (!response || typeof response !== "object" || Array.isArray(response)) {
@@ -56,6 +61,12 @@ export async function prompt(request: Request): Promise<PromptResponse> {
       candidate.status === "cancelled" &&
       Object.keys(candidate).length === 1
     ) {
+      if (subprocess.exitCode === null) {
+        subprocess.kill();
+        await subprocess.exited;
+      } else if (subprocess.exitCode !== 0) {
+        throw new Error();
+      }
       return { status: "cancelled" };
     }
     if (
@@ -63,10 +74,14 @@ export async function prompt(request: Request): Promise<PromptResponse> {
       Object.keys(candidate).length === 2 &&
       "values" in candidate
     ) {
+      if (await deadline.run(subprocess.exited, () => subprocess.kill()) !== 0) {
+        throw new Error();
+      }
       return candidate as unknown as PromptResponse;
     }
     throw new Error();
-  } catch {
+  } catch (error) {
+    if (error instanceof DeadlineExpired) throw error;
     throw new KeyKongError(
       "PROMPT_FAILED",
       "native prompt returned an invalid response",
