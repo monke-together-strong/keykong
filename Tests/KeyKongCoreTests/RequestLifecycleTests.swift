@@ -3,6 +3,139 @@ import XCTest
 @testable import KeyKongCore
 
 final class RequestLifecycleTests: XCTestCase {
+    func testCancellationReturnsJSONAndNonzeroExit() {
+        let adapter = RecordingAdapter(outcome: .cancelled)
+
+        let execution = KeyKongCommand(adapter: adapter).run(
+            arguments: ["request", "--request", "-"],
+            standardInput: Data(responseOnlyRequestJSON.utf8)
+        )
+
+        XCTAssertEqual(execution.exitCode, 1)
+        XCTAssertEqual(execution.standardError, Data())
+        XCTAssertEqual(
+            String(decoding: execution.standardOutput, as: UTF8.self),
+            #"{"status":"cancelled","values":{}}"# + "\n"
+        )
+    }
+
+    func testExpiryReturnsJSONAndNonzeroExit() {
+        let adapter = RecordingAdapter(outcome: .expired)
+
+        let execution = KeyKongCommand(adapter: adapter).run(
+            arguments: ["request", "--request", "-"],
+            standardInput: Data(responseOnlyRequestJSON.utf8)
+        )
+
+        XCTAssertEqual(execution.exitCode, 1)
+        XCTAssertEqual(execution.standardError, Data())
+        XCTAssertEqual(
+            String(decoding: execution.standardOutput, as: UTF8.self),
+            #"{"status":"expired","values":{}}"# + "\n"
+        )
+    }
+
+    func testPartialDeliveryReturnsFailedIDsAndNonSecretValues() throws {
+        let successfulTarget = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let failedTarget = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try Data().write(to: successfulTarget)
+        try Data().write(to: failedTarget)
+        defer {
+            try? FileManager.default.removeItem(at: successfulTarget)
+            try? FileManager.default.removeItem(at: failedTarget)
+        }
+
+        let requestJSON = twoDeliveryRequestJSON(
+            firstTarget: successfulTarget,
+            secondTarget: failedTarget
+        )
+        let adapter = RemovingAdapter(
+            target: failedTarget,
+            outcome: .submitted([
+                "environment": .text("production"),
+                "api_token": .text("highly-secret")
+            ])
+        )
+
+        let execution = KeyKongCommand(adapter: adapter).run(
+            arguments: ["request", "--request", "-"],
+            standardInput: Data(requestJSON.utf8)
+        )
+        let combinedOutput = execution.standardOutput + execution.standardError
+
+        XCTAssertEqual(execution.exitCode, 1)
+        XCTAssertEqual(
+            String(decoding: execution.standardOutput, as: UTF8.self),
+            #"{"failedDeliveries":["write-token"],"status":"partial","values":{"environment":"production"}}"# + "\n"
+        )
+        XCTAssertEqual(
+            try String(contentsOf: successfulTarget, encoding: .utf8),
+            "production\n"
+        )
+        XCTAssertFalse(String(decoding: combinedOutput, as: UTF8.self).contains("highly-secret"))
+    }
+
+    func testChildProcessDeliveryReturnsOnlyFailedIDs() throws {
+        let worker = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let firstTarget = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let secondTarget = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        let workerScript = """
+        #!/bin/sh
+        [ "$1" = "_delivery-worker" ] || exit 2
+        payload=$(cat)
+        case "$payload" in
+          *highly-secret*) ;;
+          *) exit 3 ;;
+        esac
+        printf '{"failedDeliveryIDs":["write-token"]}\\n'
+        """
+        try Data(workerScript.utf8).write(to: worker)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: worker.path
+        )
+        try Data().write(to: firstTarget)
+        try Data().write(to: secondTarget)
+        defer {
+            try? FileManager.default.removeItem(at: worker)
+            try? FileManager.default.removeItem(at: firstTarget)
+            try? FileManager.default.removeItem(at: secondTarget)
+        }
+
+        let requestJSON = twoDeliveryRequestJSON(
+            firstTarget: firstTarget,
+            secondTarget: secondTarget
+        )
+        let adapter = RecordingAdapter(
+            outcome: .submitted([
+                "environment": .text("production"),
+                "api_token": .text("highly-secret")
+            ])
+        )
+        let command = KeyKongCommand(
+            adapter: adapter,
+            deliveryExecutor: ChildProcessDeliveryExecutor(executableURL: worker)
+        )
+
+        let execution = command.run(
+            arguments: ["request", "--request", "-"],
+            standardInput: Data(requestJSON.utf8)
+        )
+        let combinedOutput = execution.standardOutput + execution.standardError
+
+        XCTAssertEqual(execution.exitCode, 1)
+        XCTAssertEqual(
+            String(decoding: execution.standardOutput, as: UTF8.self),
+            #"{"failedDeliveries":["write-token"],"status":"partial","values":{"environment":"production"}}"# + "\n"
+        )
+        XCTAssertFalse(String(decoding: combinedOutput, as: UTF8.self).contains("highly-secret"))
+    }
+
     func testTargetLinesAreValidatedInDeliveryOrder() throws {
         let target = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
@@ -216,6 +349,14 @@ final class RequestLifecycleTests: XCTestCase {
         let combinedOutput = execution.standardOutput + execution.standardError
 
         XCTAssertEqual(execution.exitCode, 1)
+        XCTAssertEqual(
+            String(decoding: execution.standardOutput, as: UTF8.self),
+            #"{"status":"failed","values":{}}"# + "\n"
+        )
+        XCTAssertEqual(
+            String(decoding: execution.standardError, as: UTF8.self),
+            "all deliveries failed\n"
+        )
         XCTAssertFalse(String(decoding: combinedOutput, as: UTF8.self).contains("highly-secret"))
     }
 
@@ -350,6 +491,46 @@ final class RequestLifecycleTests: XCTestCase {
             "request failed: adapter returned an invalid value for field 'environment'\n"
         )
     }
+}
+
+private let responseOnlyRequestJSON = """
+{
+  "id": "release-input",
+  "title": "Prepare release",
+  "fields": [
+    { "id": "environment", "label": "Environment", "type": "text" }
+  ]
+}
+"""
+
+private func twoDeliveryRequestJSON(
+    firstTarget: URL,
+    secondTarget: URL
+) -> String {
+    """
+    {
+      "id": "partial-delivery",
+      "title": "Add credentials",
+      "fields": [
+        { "id": "environment", "label": "Environment", "type": "text" },
+        { "id": "api_token", "label": "API token", "type": "secret" }
+      ],
+      "deliveries": [
+        {
+          "id": "write-environment",
+          "path": "\(firstTarget.path)",
+          "operation": "append",
+          "template": "{{ environment }}\\n"
+        },
+        {
+          "id": "write-token",
+          "path": "\(secondTarget.path)",
+          "operation": "append",
+          "template": "{{ api_token }}"
+        }
+      ]
+    }
+    """
 }
 
 private final class RecordingAdapter: InputAdapter {

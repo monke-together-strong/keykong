@@ -5,6 +5,77 @@ import XCTest
 
 @MainActor
 final class MacOSInputFormTests: XCTestCase {
+    func testCancellationClearsEnteredValuesBeforeCompleting() throws {
+        let request = InputRequest(
+            id: "cancel-input",
+            title: "Cancel input",
+            fields: [
+                InputField(id: "name", label: "Name", type: .text),
+                InputField(id: "token", label: "Token", type: .secret)
+            ],
+            deliveries: [
+                Delivery(
+                    id: "write-token",
+                    path: "/tmp/existing.env",
+                    operation: .append,
+                    template: "{{ token }}"
+                )
+            ]
+        )
+        var outcome: InputOutcome?
+        let form = MacOSInputFormController(request: request) {
+            outcome = $0
+        }
+        let nameInput = try XCTUnwrap(form.inputViews[0] as? NSTextField)
+        let secretInput = try XCTUnwrap(form.inputViews[1] as? SecretInputView)
+        nameInput.stringValue = "production"
+        secretInput.secureTextField.stringValue = "highly-secret"
+        secretInput.revealButton.performClick(nil)
+
+        form.cancelButton.performClick(nil)
+
+        XCTAssertEqual(outcome, .cancelled)
+        XCTAssertEqual(nameInput.stringValue, "")
+        XCTAssertEqual(secretInput.secureTextField.stringValue, "")
+        XCTAssertEqual(secretInput.revealedTextField.stringValue, "")
+        XCTAssertEqual(secretInput.revealButton.state, .off)
+    }
+
+    func testExpirationClearsEnteredValuesAndCompletesAsExpired() throws {
+        let request = InputRequest(
+            id: "expiring-input",
+            title: "Expiring input",
+            fields: [
+                InputField(id: "token", label: "Token", type: .secret)
+            ],
+            deliveries: [
+                Delivery(
+                    id: "write-token",
+                    path: "/tmp/existing.env",
+                    operation: .append,
+                    template: "{{ token }}"
+                )
+            ]
+        )
+        var outcome: InputOutcome?
+        let form = MacOSInputFormController(
+            request: request,
+            expirationInterval: 0.01
+        ) {
+            outcome = $0
+        }
+        let secretInput = try XCTUnwrap(form.inputViews.first as? SecretInputView)
+        secretInput.secureTextField.stringValue = "highly-secret"
+
+        form.show()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        XCTAssertEqual(outcome, .expired)
+        XCTAssertEqual(secretInput.secureTextField.stringValue, "")
+        XCTAssertEqual(secretInput.revealedTextField.stringValue, "")
+        form.window.orderOut(nil)
+    }
+
     func testSecretFieldIsMaskedCanBeRevealedAndDetailsStaySanitized() throws {
         let request = InputRequest(
             id: "credential-input",

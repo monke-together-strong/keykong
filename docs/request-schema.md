@@ -79,12 +79,40 @@ fields. Secret fields are omitted:
 }
 ```
 
+## Outcomes
+
+Every invocation writes exactly one JSON result to standard output. Only
+`completed` exits with code zero; `partial`, `failed`, `cancelled`, and
+`expired` exit nonzero. Human-readable diagnostics, when present, are written
+only to standard error.
+
+A request is `partial` when at least one delivery succeeds and at least one
+fails. Completed deliveries remain applied, non-secret submitted values are
+returned, and `failedDeliveries` contains only the failed delivery IDs:
+
+```json
+{
+  "status": "partial",
+  "values": {
+    "release_name": "2026.07"
+  },
+  "failedDeliveries": ["write-token"]
+}
+```
+
+When all deliveries fail, the status is `failed` and `failedDeliveries` is
+omitted. Validation and worker failures also return `failed`. Cancellation and
+the ten-minute request timeout return `cancelled` and `expired`, respectively,
+with empty `values`.
+
 Delivery IDs are stable. Every target must be an existing readable and writable
 regular file at an absolute path. An `insert_line` delivery inserts the rendered
 template before its one-based `line`; Key Kong adds a trailing newline when the
 rendered template does not already have one. An `append` delivery writes the
 rendered template exactly at the end of the file and must not declare `line`.
 Deliveries run in request order, including deliveries that share a target.
+Delivery writes run in a child process, which inherits the CLI caller's
+operating-system sandbox and permissions.
 
 Templates perform only `{{ field_id }}` substitution. Template field references
 must exist, secret fields must be referenced by at least one delivery, and

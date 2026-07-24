@@ -1,6 +1,6 @@
 import Foundation
 
-enum DeliveryExecutor {
+struct DeliveryExecutor: DeliveryExecuting {
     static func validateTargets(_ deliveries: [Delivery]) throws {
         var simulatedTargets: [String: Data] = [:]
 
@@ -56,21 +56,25 @@ enum DeliveryExecutor {
         }
     }
 
-    static func execute(
+    func execute(
         _ deliveries: [Delivery],
         values: [String: ResponseValue]
-    ) throws {
+    ) -> [String] {
+        var failedDeliveryIDs: [String] = []
+
         for delivery in deliveries {
             do {
                 let template = try FieldTemplate(delivery.template)
                 let rendered = Data(try template.render(values: values).utf8)
-                var target = try readTarget(delivery)
-                try apply(delivery, rendered: rendered, to: &target)
+                var target = try Self.readTarget(delivery)
+                try Self.apply(delivery, rendered: rendered, to: &target)
                 try target.write(to: URL(fileURLWithPath: delivery.path))
             } catch {
-                throw ValidationError("delivery '\(delivery.id)' failed")
+                failedDeliveryIDs.append(delivery.id)
             }
         }
+
+        return failedDeliveryIDs
     }
 
     private static func readTarget(_ delivery: Delivery) throws -> Data {

@@ -13,11 +13,18 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
     private(set) var errorLabels: [String: NSTextField] = [:]
 
     private let request: InputRequest
+    private let expirationInterval: TimeInterval
     private let onComplete: (InputOutcome) -> Void
     private var didComplete = false
+    private var expirationTimer: Timer?
 
-    init(request: InputRequest, onComplete: @escaping (InputOutcome) -> Void) {
+    init(
+        request: InputRequest,
+        expirationInterval: TimeInterval = 10 * 60,
+        onComplete: @escaping (InputOutcome) -> Void
+    ) {
         self.request = request
+        self.expirationInterval = expirationInterval
         self.onComplete = onComplete
         self.window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 480, height: 540),
@@ -45,6 +52,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         window.orderFrontRegardless()
         window.makeFirstResponder(firstFocusableView())
         NSApp.activate(ignoringOtherApps: true)
+        startExpirationTimer()
     }
 
     @objc private func submit() {
@@ -109,6 +117,10 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
 
     @objc private func cancel() {
         finish(with: .cancelled)
+    }
+
+    @objc private func expire() {
+        finish(with: .expired)
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -306,7 +318,40 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
     private func finish(with outcome: InputOutcome) {
         guard !didComplete else { return }
         didComplete = true
+        expirationTimer?.invalidate()
+        expirationTimer = nil
+        clearInputs()
         onComplete(outcome)
+    }
+
+    private func startExpirationTimer() {
+        guard expirationTimer == nil else { return }
+        let timer = Timer(
+            timeInterval: expirationInterval,
+            target: self,
+            selector: #selector(expire),
+            userInfo: nil,
+            repeats: false
+        )
+        RunLoop.main.add(timer, forMode: .common)
+        expirationTimer = timer
+    }
+
+    private func clearInputs() {
+        for (field, view) in zip(request.fields, inputViews) {
+            switch field.type {
+            case .text:
+                (view as? NSTextField)?.stringValue = ""
+            case .secret:
+                (view as? SecretInputView)?.clear()
+            case .select:
+                (view as? NSPopUpButton)?.selectItem(at: 0)
+            case .multiSelect:
+                (view as? NSStackView)?.arrangedSubviews
+                    .compactMap { $0 as? NSButton }
+                    .forEach { $0.state = .off }
+            }
+        }
     }
 
     private static func describe(_ delivery: Delivery) -> String {
@@ -394,5 +439,13 @@ final class SecretInputView: NSView {
             secureTextField.isHidden = false
             window?.makeFirstResponder(secureTextField)
         }
+    }
+
+    func clear() {
+        secureTextField.stringValue = ""
+        revealedTextField.stringValue = ""
+        revealButton.state = .off
+        revealedTextField.isHidden = true
+        secureTextField.isHidden = false
     }
 }

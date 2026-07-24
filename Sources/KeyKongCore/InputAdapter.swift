@@ -7,6 +7,7 @@ public protocol InputAdapter {
 public enum InputOutcome: Equatable, Sendable {
     case submitted([String: ResponseValue])
     case cancelled
+    case expired
 }
 
 public enum ResponseValue: Equatable, Sendable {
