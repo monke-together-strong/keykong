@@ -9,7 +9,8 @@ producer | key-kong request -
 
 A request declares `schemaVersion: 1`, has a stable request `id`, a dialog
 `title`, required `fields` in presentation order, and optional `deliveries`.
-Run `key-kong schema` for the machine-readable JSON Schema.
+Run `key-kong schema` for the machine-readable JSON Schema, `key-kong --help`
+for usage, and `key-kong --version` for the installed version.
 
 Fields may be `text`, `secret`, `select`, or `multi_select`. Deliveries append
 rendered templates or insert them before an existing line in an absolute,
@@ -79,8 +80,27 @@ multi-select fields. Secret fields are delivered but always omitted:
 ```
 
 The `request` command writes exactly one newline-terminated JSON result to
-standard output. `completed` exits with code zero, cancellation exits with code
-one, and CLI misuse or an invalid request exits with code two. A `partial`
-result includes only the failed delivery IDs while retaining successful writes;
-if every delivery fails, the result is `failed`. Failures include a structured
-`error` with a stable, machine-readable code.
+standard output. Every result has a `status` and `values` object:
+
+- `completed`: prompting and every delivery succeeded.
+- `partial`: at least one delivery succeeded and at least one failed;
+  `failedDeliveries` contains only the failed delivery IDs.
+- `failed`: the request did not complete because of usage, validation, prompt,
+  delivery, or internal failure. This includes the case where every delivery
+  failed.
+- `cancelled`: the user cancelled the prompt.
+- `expired`: the whole-request deadline elapsed.
+
+Failures use a structured `error` with one of these stable categories:
+
+- `CLI_USAGE`: the command shape is invalid.
+- `INVALID_REQUEST`: the request cannot be read, decoded, or validated.
+- `PROMPT_FAILED`: the native helper could not start or returned an invalid
+  response or submission.
+- `DELIVERY_FAILED`: one or more deliveries failed.
+- `INTERNAL_FAILURE`: an unexpected Broker failure occurred.
+
+Exit code `0` is reserved for `completed`. Other valid request outcomes,
+including `partial`, `failed`, `cancelled`, and `expired`, exit `1`. CLI misuse
+and invalid requests exit `2`. The JSON status and error code are the canonical
+machine-readable outcome; human diagnostics go to standard error.

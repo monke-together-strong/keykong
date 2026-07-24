@@ -1,28 +1,24 @@
 import AppKit
 import XCTest
-@testable import KeyKongCore
-@testable import KeyKongMacOS
+@testable import KeyKongPrompt
 
 @MainActor
 final class MacOSInputFormTests: XCTestCase {
     func testCancellationClearsEnteredValuesBeforeCompleting() throws {
-        let request = InputRequest(
-            id: "cancel-input",
+        let request = PromptRequest(
             title: "Cancel input",
             fields: [
-                InputField(id: "name", label: "Name", type: .text),
-                InputField(id: "token", label: "Token", type: .secret)
+                PromptField(id: "name", label: "Name", type: .text),
+                PromptField(id: "token", label: "Token", type: .secret)
             ],
             deliveries: [
-                Delivery(
-                    id: "write-token",
+                PromptDelivery(
                     path: "/tmp/existing.env",
-                    operation: .append,
-                    template: "{{ token }}"
+                    operation: .append
                 )
             ]
         )
-        var outcome: InputOutcome?
+        var outcome: PromptOutcome?
         let form = MacOSInputFormController(request: request) {
             outcome = $0
         }
@@ -41,65 +37,25 @@ final class MacOSInputFormTests: XCTestCase {
         XCTAssertEqual(secretInput.revealButton.state, .off)
     }
 
-    func testExpirationClearsEnteredValuesAndCompletesAsExpired() throws {
-        let request = InputRequest(
-            id: "expiring-input",
-            title: "Expiring input",
-            fields: [
-                InputField(id: "token", label: "Token", type: .secret)
-            ],
-            deliveries: [
-                Delivery(
-                    id: "write-token",
-                    path: "/tmp/existing.env",
-                    operation: .append,
-                    template: "{{ token }}"
-                )
-            ]
-        )
-        var outcome: InputOutcome?
-        let form = MacOSInputFormController(
-            request: request,
-            expirationInterval: 0.01
-        ) {
-            outcome = $0
-        }
-        let secretInput = try XCTUnwrap(form.inputViews.first as? SecretInputView)
-        secretInput.secureTextField.stringValue = "highly-secret"
-
-        form.show()
-        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-
-        XCTAssertEqual(outcome, .expired)
-        XCTAssertEqual(secretInput.secureTextField.stringValue, "")
-        XCTAssertEqual(secretInput.revealedTextField.stringValue, "")
-        form.window.orderOut(nil)
-    }
-
     func testSecretFieldIsMaskedCanBeRevealedAndDetailsStaySanitized() throws {
-        let request = InputRequest(
-            id: "credential-input",
+        let request = PromptRequest(
             title: "Add credentials",
             fields: [
-                InputField(id: "api_token", label: "API token", type: .secret)
+                PromptField(id: "api_token", label: "API token", type: .secret)
             ],
             deliveries: [
-                Delivery(
-                    id: "append-token",
+                PromptDelivery(
                     path: "/tmp/existing.env",
-                    operation: .append,
-                    template: "TOKEN={{ api_token }}"
+                    operation: .append
                 ),
-                Delivery(
-                    id: "insert-token",
+                PromptDelivery(
                     path: "/tmp/settings",
                     operation: .insertLine,
-                    line: 2,
-                    template: "{{ api_token }}"
+                    line: 2
                 )
             ]
         )
-        var outcome: InputOutcome?
+        var outcome: PromptOutcome?
         let form = MacOSInputFormController(request: request) {
             outcome = $0
         }
@@ -143,31 +99,30 @@ final class MacOSInputFormTests: XCTestCase {
     }
 
     func testFormPresentsAndSubmitsRequiredFieldsInRequestOrder() throws {
-        let request = InputRequest(
-            id: "release-input",
+        let request = PromptRequest(
             title: "Prepare release",
             fields: [
-                InputField(id: "release_name", label: "Release name", type: .text),
-                InputField(
+                PromptField(id: "release_name", label: "Release name", type: .text),
+                PromptField(
                     id: "environment",
                     label: "Environment shown to the user",
                     type: .select,
                     options: [
-                        InputOption(label: "Production display label", value: "production")
+                        PromptOption(label: "Production display label", value: "production")
                     ]
                 ),
-                InputField(
+                PromptField(
                     id: "services",
                     label: "Services",
                     type: .multiSelect,
                     options: [
-                        InputOption(label: "API display label", value: "api"),
-                        InputOption(label: "Web display label", value: "web")
+                        PromptOption(label: "API display label", value: "api"),
+                        PromptOption(label: "Web display label", value: "web")
                     ]
                 )
             ]
         )
-        var outcome: InputOutcome?
+        var outcome: PromptOutcome?
         let form = MacOSInputFormController(request: request) {
             outcome = $0
         }

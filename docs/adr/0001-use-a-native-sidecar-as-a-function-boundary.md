@@ -1,3 +1,24 @@
 # Use a native sidecar as a function boundary
 
-Each Key Kong CLI invocation runs one Bun process for one request, and Bun treats native prompting like an ordinary function call. On macOS, Bun launches one bundled Swift helper, writes one JSON prompt request to its private stdin, reads one JSON response from its private stdout, and lets the helper exit; EOF frames the exchange, while validation, deadlines, delivery, and caller-facing results remain in Bun. Swift returns only submitted values or cancellation, and Bun maps timeouts and native-call failures to caller-facing outcomes. The macOS distribution is a self-contained CLI layout with the compiled Bun executable under `bin/` and its signed Swift helper under `libexec/`, resolved from the installation rather than `PATH`. This preserves native UI without an application bundle, daemon, FFI, or unnecessary protocol infrastructure, while allowing future platforms to implement the same logical prompt function using their appropriate native mechanism. The security boundary protects submitted values from the invoking caller and accidental disclosure through process channels; a compromised broker or operating system, administrator access, and malicious software already capable of inspecting the user's processes or input are outside the threat model.
+Each Key Kong CLI invocation runs one Bun process for one request. Bun is the
+Broker and treats native prompting like an ordinary function call. On macOS,
+Bun launches one bundled Swift Prompt Adapter, writes one presentation-only
+JSON request to its private stdin, reads one submission or cancellation JSON
+response from its private stdout, and lets the helper exit. EOF frames the
+exchange. Validation, deadlines, delivery, caller-facing results, and clearing
+the request lifecycle remain in Bun.
+
+The repository contains one Bun package for the Broker and one Swift package
+for the macOS Prompt Adapter. The self-contained distribution places the sole
+public executable at `bin/key-kong` and the private signed helper at
+`libexec/key-kong-prompt`; the Broker resolves the helper from the installation,
+not `PATH`. Swift contains no public CLI, request lifecycle, authoritative
+validation, or delivery implementation. Bun owns authoritative request and
+submission validation; Swift retains only immediate required-field feedback as
+part of the native form experience.
+
+This architecture has no application bundle, daemon, FFI, plugin registry, or
+runtime adapter discovery. The security boundary protects submitted values
+from accidental disclosure through process channels. A compromised Broker or
+operating system, administrator access, and malicious software already capable
+of inspecting the user's processes or input are outside the threat model.
