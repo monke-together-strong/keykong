@@ -20,9 +20,10 @@ Use ordinary options only for small invocation controls that are not already in
 the request schema, such as `--help` and `--version`. Do not represent fields,
 deliveries, templates, or secrets as repeated command-line flags.
 
-The command writes exactly one status word to standard output:
-`completed`, `cancelled`, `expired`, or `failed`. Diagnostics belong on standard
-error. Only `completed` exits successfully.
+The command writes one JSON result to standard output. The result includes a
+status (`completed`, `partial`, `failed`, `cancelled`, or `expired`) and any
+non-secret response values keyed by stable field ID. Diagnostics belong on
+standard error. Only `completed` exits successfully.
 
 ## Why this interface
 
