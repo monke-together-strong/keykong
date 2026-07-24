@@ -707,10 +707,13 @@ describe("built CLI response request", () => {
     const bin = join(layout, "bin");
     const libexec = join(layout, "libexec");
     const productionCLI = join(bin, "key-kong");
-    const bundledHelper = join(libexec, "key-kong-prompt");
+    const bundledHelper = join(
+      libexec,
+      "KeyKongPrompt.app/Contents/MacOS/key-kong-prompt",
+    );
     const overrideHelper = join(layout, "override-prompt");
     await mkdir(bin, { recursive: true });
-    await mkdir(libexec, { recursive: true });
+    await mkdir(resolve(bundledHelper, ".."), { recursive: true });
     await writeFile(
       bundledHelper,
       `#!/bin/sh

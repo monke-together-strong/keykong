@@ -9,7 +9,10 @@ function helperPath(): string {
   if (KEY_KONG_TESTING && process.env.KEY_KONG_PROMPT_EXECUTABLE) {
     return process.env.KEY_KONG_PROMPT_EXECUTABLE;
   }
-  return resolve(dirname(process.execPath), "../libexec/key-kong-prompt");
+  return resolve(
+    dirname(process.execPath),
+    "../libexec/KeyKongPrompt.app/Contents/MacOS/key-kong-prompt",
+  );
 }
 
 export async function prompt(

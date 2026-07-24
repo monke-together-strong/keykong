@@ -6,7 +6,7 @@
   "scripts": {
     "build": "bun build --compile --define KEY_KONG_TESTING=false --outfile dist/bin/key-kong src/main.ts src/delivery-worker.ts",
     "build:test": "bun build --compile --define KEY_KONG_TESTING=true --outfile dist/bin/key-kong src/main.ts src/delivery-worker.ts",
-    "build:helper": "swift build --package-path native/macos -c release --product key-kong-prompt && mkdir -p dist/libexec && cp native/macos/.build/release/key-kong-prompt dist/libexec/key-kong-prompt",
+    "build:helper": "sh scripts/build-macos-helper.sh",
     "package:macos": "sh scripts/package-macos.sh",
     "check": "bunx tsc --noEmit",
     "test": "bun run build:test && bun test",

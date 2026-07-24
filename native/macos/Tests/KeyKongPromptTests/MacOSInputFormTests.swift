@@ -4,6 +4,48 @@ import XCTest
 
 @MainActor
 final class MacOSInputFormTests: XCTestCase {
+    func testWindowUsesConventionalApplicationBehavior() {
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Conventional window",
+                fields: [
+                    PromptField(id: "name", label: "Name", type: .text)
+                ]
+            )
+        ) { _ in }
+
+        XCTAssertTrue(form.window.styleMask.contains(.miniaturizable))
+        XCTAssertEqual(form.window.level, .normal)
+    }
+
+    func testReactivationRestoresTheExistingPromptWindow() {
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Reactivate prompt",
+                fields: [
+                    PromptField(id: "name", label: "Name", type: .text)
+                ]
+            )
+        ) { _ in }
+        let applicationDelegate = PromptApplicationDelegate(
+            window: form.window
+        )
+        form.window.orderFront(nil)
+        form.window.miniaturize(nil)
+
+        let shouldCreateWindow = applicationDelegate
+            .applicationShouldHandleReopen(
+                NSApplication.shared,
+                hasVisibleWindows: false
+            )
+
+        XCTAssertFalse(shouldCreateWindow)
+        XCTAssertFalse(form.window.isMiniaturized)
+        XCTAssertTrue(form.window.isVisible)
+        XCTAssertIdentical(applicationDelegate.window, form.window)
+        form.window.orderOut(nil)
+    }
+
     func testCancellationClearsEnteredValuesBeforeCompleting() throws {
         let request = PromptRequest(
             title: "Cancel input",

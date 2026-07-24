@@ -24,7 +24,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         self.onComplete = onComplete
         self.window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 480, height: 540),
-            styleMask: [.titled, .closable],
+            styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )

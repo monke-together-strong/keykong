@@ -5,6 +5,30 @@ import XCTest
 @testable import KeyKongPrompt
 
 final class PromptTests: XCTestCase {
+    @MainActor
+    func testParentProcessMonitorUsesAQueueSafeExitHandler() throws {
+        let parent = Process()
+        parent.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        parent.arguments = ["0.1"]
+        try parent.run()
+        let callback = DispatchSemaphore(value: 0)
+        let monitor = try XCTUnwrap(
+            ParentProcessMonitor(
+                processID: parent.processIdentifier,
+                onExit: { @Sendable in
+                    callback.signal()
+                }
+            )
+        )
+
+        XCTAssertEqual(
+            callback.wait(timeout: .now() + 2),
+            .success
+        )
+        parent.waitUntilExit()
+        monitor.cancel()
+    }
+
     func testRealHelperReadsOneRequestAndWritesOneResponse() throws {
         let productsDirectory = Bundle(for: Self.self).bundleURL
             .deletingLastPathComponent()

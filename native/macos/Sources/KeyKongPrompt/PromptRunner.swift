@@ -11,6 +11,15 @@ public enum PromptRunner {
             outcome = $0
             NSApp.stopModal()
         }
+        let previousDelegate = app.delegate
+        let applicationDelegate = PromptApplicationDelegate(
+            window: form.window
+        )
+        app.delegate = applicationDelegate
+        defer {
+            app.delegate = previousDelegate
+        }
+        app.finishLaunching()
         form.show()
         app.runModal(for: form.window)
         form.window.orderOut(nil)

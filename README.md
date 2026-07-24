@@ -4,7 +4,7 @@ A secure, blocking input Broker for agent skills and manual workflows.
 
 The shipped macOS architecture is one Bun package and one Swift package. Bun
 provides the sole public `key-kong` executable; Swift provides only the private,
-one-shot AppKit Prompt Adapter.
+one-shot AppKit Prompt Adapter packaged as an application bundle.
 
 ## Build and run
 
@@ -22,10 +22,22 @@ Build and sign the self-contained macOS layout in `dist/`:
 bun run package:macos
 ```
 
-The public Bun executable is `dist/bin/key-kong`, and its compatible private
-helper is `dist/libexec/key-kong-prompt`. Packaging uses an ad-hoc signature by
+The public Bun executable is `dist/bin/key-kong`. Its compatible private helper
+is:
+
+```text
+dist/libexec/KeyKongPrompt.app/
+└── Contents/
+    ├── Info.plist
+    └── MacOS/
+        └── key-kong-prompt
+```
+
+The bundle is not installed in `/Applications`; Bun launches its nested
+executable from this fixed location. Packaging uses an ad-hoc signature by
 default. Set `KEY_KONG_SIGNING_IDENTITY` to a signing identity for release
-artifacts; both executables are verified after signing.
+artifacts. Packaging signs the nested helper before the app container, signs the
+CLI separately, and strictly verifies all three.
 
 Submit a versioned JSON request from a file or explicit standard input:
 
@@ -55,5 +67,12 @@ paths, operations, and insertion lines, but never templates or delivery
 behavior.
 
 Each invocation is one Bun process and, when prompting is needed, one Swift
-helper process. There is no daemon, FFI boundary, plugin registry, request
-history, or retained submitted value after the terminal result is produced.
+helper process. While input is pending, the private app has regular macOS
+activation behavior: `KeyKong` appears in the Dock and Command-Tab, its window
+can be covered or miniaturized, and reactivation restores the same prompt
+without creating another. The window is not permanently floating.
+
+The application bundle supplies the stable Launch Services identity required
+for that discoverability; it does not turn the adapter into a daemon or a public
+application. There is no FFI boundary, plugin registry, request history, or
+retained submitted value after the terminal result is produced.

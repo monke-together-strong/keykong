@@ -6,13 +6,24 @@ bun run build
 bun run build:helper
 
 identity=${KEY_KONG_SIGNING_IDENTITY:--}
-for executable in dist/bin/key-kong dist/libexec/key-kong-prompt; do
+app=dist/libexec/KeyKongPrompt.app
+helper=$app/Contents/MacOS/key-kong-prompt
+
+sign() {
+  target=$1
   if [ "$identity" = "-" ]; then
-    codesign --force --sign - "$executable"
+    codesign --force --sign - "$target"
   else
-    codesign --force --timestamp --sign "$identity" "$executable"
+    codesign --force --timestamp --sign "$identity" "$target"
   fi
-  codesign --verify --strict --verbose=2 "$executable"
-done
+}
+
+sign "$helper"
+sign "$app"
+sign dist/bin/key-kong
+
+codesign --verify --strict --verbose=2 "$helper"
+codesign --verify --deep --strict --verbose=2 "$app"
+codesign --verify --strict --verbose=2 dist/bin/key-kong
 
 bun scripts/smoke-package.ts

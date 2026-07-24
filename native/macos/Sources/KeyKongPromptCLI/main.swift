@@ -1,24 +1,15 @@
 import Darwin
-import Dispatch
 import Foundation
 import KeyKongPrompt
 
-let brokerPID = getppid()
-guard brokerPID > 1 else {
+guard let brokerMonitor = ParentProcessMonitor(
+    processID: getppid(),
+    onExit: { @Sendable in
+        Darwin._exit(0)
+    }
+) else {
     exit(1)
 }
-let brokerMonitorQueue = DispatchQueue(
-    label: "dev.key-kong.parent-process-monitor"
-)
-let brokerMonitor = DispatchSource.makeProcessSource(
-    identifier: brokerPID,
-    eventMask: .exit,
-    queue: brokerMonitorQueue
-)
-brokerMonitor.setEventHandler {
-    Darwin._exit(0)
-}
-brokerMonitor.resume()
 defer {
     brokerMonitor.cancel()
 }
