@@ -10,6 +10,9 @@ producer | key-kong request -
 A request declares `schemaVersion: 1`, has a stable request `id`, a dialog
 `title`, required `fields` in presentation order, and optional `deliveries` in execution
 order. Run `key-kong schema` for its machine-readable JSON Schema.
+The serialized request is limited to 1 MiB, with at most 256 fields,
+256 options per selection field, and 256 deliveries. These bounds keep parsing
+and validation inside the whole-request deadline.
 
 ```json
 {

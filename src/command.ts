@@ -1,7 +1,7 @@
-import { readFile } from "node:fs/promises";
 import type { Deadline } from "./deadline";
 import { deliver } from "./delivery";
 import { ExpiredError, KeyKongError } from "./errors";
+import { requestLimits } from "./limits";
 import { prompt } from "./prompt";
 import type { Result } from "./types";
 import { validateRequest, validateSubmission } from "./validation";
@@ -16,6 +16,36 @@ function usage(): never {
   throw new KeyKongError("CLI_USAGE", "usage: key-kong request <file|->", 2);
 }
 
+async function readRequest(source: string, deadline: Deadline): Promise<string> {
+  const reader = (source === "-" ? Bun.stdin : Bun.file(source))
+    .stream()
+    .getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await deadline.race(
+        reader.read(),
+        () => void reader.cancel(),
+      );
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > requestLimits.bytes) {
+        void reader.cancel();
+        throw new KeyKongError(
+          "INVALID_REQUEST",
+          `request exceeds ${requestLimits.bytes} bytes`,
+          2,
+        );
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, bytes).toString("utf8");
+}
+
 export async function requestCommand(
   args: string[],
   deadline: Deadline,
@@ -24,27 +54,29 @@ export async function requestCommand(
   const source = args[1]!;
   let text: string;
   try {
-    text =
-      source === "-"
-        ? await deadline.race(Bun.stdin.text())
-        : await deadline.race(readFile(source, "utf8"));
+    text = await readRequest(source, deadline);
   } catch (error) {
     if (error instanceof KeyKongError || error instanceof ExpiredError) throw error;
     throw new KeyKongError("INVALID_REQUEST", "request could not be read", 2);
   }
 
+  deadline.check();
   let raw: unknown;
   try {
     raw = JSON.parse(text);
   } catch {
     throw new KeyKongError("INVALID_REQUEST", "request is not valid JSON", 2);
   }
-  const { request, targets } = await deadline.race(validateRequest(raw));
+  deadline.check();
+  const { request, targets } = await deadline.race(
+    validateRequest(raw, deadline),
+  );
   const response = await prompt(request, deadline);
   if (response.status === "cancelled") {
     return { result: { status: "cancelled", values: {} }, exitCode: 1 };
   }
 
+  deadline.check();
   const values = validateSubmission(response.values, request);
   for (const fieldID of Object.keys(response.values)) {
     delete response.values[fieldID];

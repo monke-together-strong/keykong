@@ -1,5 +1,27 @@
+import Darwin
+import Dispatch
 import Foundation
 import KeyKongPrompt
+
+let brokerPID = getppid()
+guard brokerPID > 1 else {
+    exit(1)
+}
+let brokerMonitorQueue = DispatchQueue(
+    label: "dev.key-kong.parent-process-monitor"
+)
+let brokerMonitor = DispatchSource.makeProcessSource(
+    identifier: brokerPID,
+    eventMask: .exit,
+    queue: brokerMonitorQueue
+)
+brokerMonitor.setEventHandler {
+    Darwin._exit(0)
+}
+brokerMonitor.resume()
+defer {
+    brokerMonitor.cancel()
+}
 
 do {
     let input = FileHandle.standardInput.readDataToEndOfFile()

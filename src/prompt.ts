@@ -1,6 +1,6 @@
 import { dirname, resolve } from "node:path";
 import type { Deadline } from "./deadline";
-import { KeyKongError } from "./errors";
+import { ExpiredError, KeyKongError } from "./errors";
 import type { PromptRequest, PromptResponse, Request } from "./types";
 
 declare const KEY_KONG_TESTING: boolean;
@@ -38,22 +38,39 @@ export async function prompt(
     throw new KeyKongError("PROMPT_FAILED", "native prompt could not be started", 1);
   }
 
-  const input = subprocess.stdin as import("bun").FileSink;
-  input.write(JSON.stringify(projected));
-  input.end();
-  const stdout = new Response(
-    subprocess.stdout as ReadableStream<Uint8Array>,
-  ).text();
-  const stderr = new Response(
-    subprocess.stderr as ReadableStream<Uint8Array>,
-  ).text();
-  const exitCode = await deadline.race(subprocess.exited, () => subprocess.kill());
-  const [output] = await deadline.race(Promise.all([stdout, stderr]));
+  const signals = [
+    ["SIGHUP", 129],
+    ["SIGINT", 130],
+    ["SIGTERM", 143],
+  ] as const;
+  const handlers = signals.map(([signal, exitCode]) => {
+    const handler = () => {
+      subprocess.kill();
+      process.exit(exitCode);
+    };
+    process.once(signal, handler);
+    return [signal, handler] as const;
+  });
 
-  if (exitCode !== 0) {
-    throw new KeyKongError("PROMPT_FAILED", "native prompt failed", 1);
-  }
   try {
+    const input = subprocess.stdin as import("bun").FileSink;
+    input.write(JSON.stringify(projected));
+    input.end();
+    const stdout = new Response(
+      subprocess.stdout as ReadableStream<Uint8Array>,
+    ).text();
+    const stderr = new Response(
+      subprocess.stderr as ReadableStream<Uint8Array>,
+    ).text();
+    const exitCode = await deadline.race(
+      subprocess.exited,
+      () => subprocess.kill(),
+    );
+    const [output] = await deadline.race(Promise.all([stdout, stderr]));
+
+    if (exitCode !== 0) {
+      throw new KeyKongError("PROMPT_FAILED", "native prompt failed", 1);
+    }
     const response: unknown = JSON.parse(output);
     if (
       !response ||
@@ -77,7 +94,15 @@ export async function prompt(
       return candidate as unknown as PromptResponse;
     }
     throw new Error();
-  } catch {
+  } catch (error) {
+    if (error instanceof KeyKongError || error instanceof ExpiredError) {
+      throw error;
+    }
     throw new KeyKongError("PROMPT_FAILED", "native prompt returned an invalid response", 1);
+  } finally {
+    subprocess.kill();
+    for (const [signal, handler] of handlers) {
+      process.removeListener(signal, handler);
+    }
   }
 }

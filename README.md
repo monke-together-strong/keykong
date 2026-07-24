@@ -16,7 +16,7 @@ Install dependencies and run the complete test suite:
 
 ```sh
 bun install
-bun test
+bun run test
 bun run test:swift
 ```
 

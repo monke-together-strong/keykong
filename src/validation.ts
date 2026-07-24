@@ -1,8 +1,9 @@
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import { insertBeforeLine } from "./content";
-import { KeyKongError } from "./errors";
+import type { Deadline } from "./deadline";
+import { ExpiredError, KeyKongError } from "./errors";
+import { requestLimits } from "./limits";
 import type {
   Delivery,
   Field,
@@ -59,7 +60,8 @@ function id(value: unknown, description: string): asserts value is string {
   }
 }
 
-function validateField(value: unknown): Field {
+function validateField(value: unknown, deadline: Deadline): Field {
+  deadline.check();
   const field = object(value, "field");
   exactKeys(field, ["id", "label", "type", "options"], ["id", "label", "type"], "field");
   id(field.id, "field ID");
@@ -74,8 +76,14 @@ function validateField(value: unknown): Field {
     if (!Array.isArray(field.options) || field.options.length === 0) {
       invalid(`field '${field.id}' must define at least one option`);
     }
+    if (field.options.length > requestLimits.optionsPerField) {
+      invalid(
+        `field '${field.id}' exceeds ${requestLimits.optionsPerField} options`,
+      );
+    }
     const values = new Set<string>();
     for (const rawOption of field.options) {
+      deadline.check();
       const option = object(rawOption, `field '${field.id}' option`);
       exactKeys(option, ["label", "value"], ["label", "value"], `field '${field.id}' option`);
       singleLine(option.label, `field '${field.id}' option label`);
@@ -87,10 +95,15 @@ function validateField(value: unknown): Field {
   return field as unknown as Field;
 }
 
-function templateReferences(template: string, deliveryID: string): string[] {
+function templateReferences(
+  template: string,
+  deliveryID: string,
+  deadline?: Deadline,
+): string[] {
   const references: string[] = [];
   let cursor = 0;
   while (cursor < template.length) {
+    deadline?.check();
     const opening = template.indexOf("{{", cursor);
     const strayClosing = template.indexOf("}}", cursor);
     if (strayClosing >= 0 && (opening < 0 || strayClosing < opening)) {
@@ -110,7 +123,12 @@ function templateReferences(template: string, deliveryID: string): string[] {
   return references;
 }
 
-function validateDelivery(value: unknown, fields: Map<string, Field>): Delivery {
+function validateDelivery(
+  value: unknown,
+  fields: Map<string, Field>,
+  deadline: Deadline,
+): Delivery {
+  deadline.check();
   const delivery = object(value, "delivery");
   exactKeys(
     delivery,
@@ -140,7 +158,7 @@ function validateDelivery(value: unknown, fields: Map<string, Field>): Delivery 
   ) {
     invalid(`insert_line delivery '${delivery.id}' needs a positive line`);
   }
-  const references = templateReferences(delivery.template, delivery.id);
+  const references = templateReferences(delivery.template, delivery.id, deadline);
   if (references.length === 0) {
     invalid(`delivery '${delivery.id}' template must reference at least one field`);
   }
@@ -154,8 +172,10 @@ function validateDelivery(value: unknown, fields: Map<string, Field>): Delivery 
 
 async function openValidatedTarget(
   delivery: Delivery,
-): Promise<{ identity: TargetIdentity; content: Buffer }> {
+  deadline: Deadline,
+): Promise<{ identity: TargetIdentity; lines: number }> {
   try {
+    deadline.check();
     const linkInfo = await lstat(delivery.path, { bigint: true });
     if (!linkInfo.isFile() || linkInfo.isSymbolicLink()) throw new Error();
     const handle = await open(
@@ -165,37 +185,61 @@ async function openValidatedTarget(
     try {
       const info = await handle.stat({ bigint: true });
       if (!info.isFile()) throw new Error();
+      const buffer = Buffer.allocUnsafe(64 * 1024);
+      let position = 0;
+      let lines = 1;
+      while (true) {
+        deadline.check();
+        const { bytesRead } = await deadline.race(
+          handle.read(buffer, 0, buffer.length, position),
+        );
+        if (bytesRead === 0) break;
+        for (let index = 0; index < bytesRead; index++) {
+          if (buffer[index] === 10) lines++;
+        }
+        position += bytesRead;
+      }
       return {
         identity: { dev: info.dev, ino: info.ino },
-        content: await handle.readFile(),
+        lines,
       };
     } finally {
       await handle.close();
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof ExpiredError) throw error;
     invalid(
       `delivery '${delivery.id}' target must be an existing readable and writable regular file`,
     );
   }
 }
 
-function simulateDelivery(delivery: Delivery, content: Buffer): Buffer {
-  const rendered = Buffer.from(
-    delivery.template.replace(/\{\{\s*[\p{L}\p{N}_-]+\s*\}\}/gu, ""),
-  );
-  if (delivery.operation === "append") return Buffer.concat([content, rendered]);
-
-  const result = insertBeforeLine(content, delivery.line!, rendered);
-  if (!result) {
+function simulateDelivery(delivery: Delivery, lines: number): number {
+  if (delivery.operation === "insert_line" && delivery.line! > lines) {
     invalid(`delivery '${delivery.id}' line is outside the target`);
   }
-  return result;
+  const rendered = delivery.template.replace(
+    /\{\{\s*[\p{L}\p{N}_-]+\s*\}\}/gu,
+    "",
+  );
+  let addedLines = 0;
+  for (let index = 0; index < rendered.length; index++) {
+    if (rendered.charCodeAt(index) === 10) addedLines++;
+  }
+  if (delivery.operation === "insert_line" && !rendered.endsWith("\n")) {
+    addedLines++;
+  }
+  return lines + addedLines;
 }
 
-export async function validateRequest(raw: unknown): Promise<{
+export async function validateRequest(
+  raw: unknown,
+  deadline: Deadline,
+): Promise<{
   request: Request;
   targets: Map<string, TargetIdentity>;
 }> {
+  deadline.check();
   const value = object(raw, "request");
   exactKeys(
     value,
@@ -209,22 +253,30 @@ export async function validateRequest(raw: unknown): Promise<{
   if (!Array.isArray(value.fields) || value.fields.length === 0) {
     invalid("at least one field is required");
   }
+  if (value.fields.length > requestLimits.fields) {
+    invalid(`request exceeds ${requestLimits.fields} fields`);
+  }
   if ("deliveries" in value && !Array.isArray(value.deliveries)) {
     invalid("deliveries must be an array");
   }
 
-  const fields = value.fields.map(validateField);
+  const fields = value.fields.map((field) => validateField(field, deadline));
   const fieldsByID = new Map(fields.map((field) => [field.id, field]));
   if (fieldsByID.size !== fields.length) invalid("field IDs must be unique");
   const deliveryValues = (value.deliveries ?? []) as unknown[];
+  if (deliveryValues.length > requestLimits.deliveries) {
+    invalid(`request exceeds ${requestLimits.deliveries} deliveries`);
+  }
   const deliveries = deliveryValues.map((delivery) =>
-    validateDelivery(delivery, fieldsByID),
+    validateDelivery(delivery, fieldsByID, deadline),
   );
   if (new Set(deliveries.map((delivery) => delivery.id)).size !== deliveries.length) {
     invalid("delivery IDs must be unique");
   }
   const referenced = new Set(
-    deliveries.flatMap((delivery) => templateReferences(delivery.template, delivery.id)),
+    deliveries.flatMap((delivery) =>
+      templateReferences(delivery.template, delivery.id, deadline),
+    ),
   );
   for (const field of fields) {
     if (field.type === "secret" && !referenced.has(field.id)) {
@@ -237,16 +289,17 @@ export async function validateRequest(raw: unknown): Promise<{
   const targets = new Map<string, TargetIdentity>();
   const simulatedTargets = new Map<
     string,
-    { identity: TargetIdentity; content: Buffer }
+    { identity: TargetIdentity; lines: number }
   >();
   for (const delivery of deliveries) {
+    deadline.check();
     const target =
       simulatedTargets.get(delivery.path) ??
-      (await openValidatedTarget(delivery));
+      (await openValidatedTarget(delivery, deadline));
     targets.set(delivery.id, target.identity);
     simulatedTargets.set(delivery.path, {
       identity: target.identity,
-      content: simulateDelivery(delivery, target.content),
+      lines: simulateDelivery(delivery, target.lines),
     });
   }
   return {

@@ -87,6 +87,10 @@ if (mode === "cancel") {
       process.exit(0);
     });
   }
+  const ready = process.env.KEY_KONG_FAKE_READY;
+  if (ready) {
+    await Bun.write(ready, "ready");
+  }
   await Bun.sleep(5_000);
 } else {
   console.log(

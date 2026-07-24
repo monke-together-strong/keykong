@@ -120,6 +120,19 @@ describe("built CLI", () => {
   test("schema, help, and version are available", () => {
     const schema = JSON.parse(run(["schema"]).stdout);
     expect(schema.properties.schemaVersion.const).toBe(1);
+    expect(schema.properties.fields.maxItems).toBe(256);
+    expect(schema.properties.deliveries.maxItems).toBe(256);
+    expect(schema.$defs.option.properties.label.$ref).toBe(
+      "#/$defs/singleLine",
+    );
+    expect(schema.$defs.delivery.properties.path.pattern).toBe("^/");
+    expect(schema.$defs.delivery.properties.template.pattern).toContain(
+      "\\{\\{",
+    );
+    const singleLine = new RegExp(schema.$defs.singleLine.pattern, "u");
+    expect(singleLine.test("Prompt")).toBeTrue();
+    expect(singleLine.test("Prompt\n")).toBeFalse();
+    expect(singleLine.test("Prompt\nInjected")).toBeFalse();
     expect(schema.$defs.field.allOf[0].then.required).toEqual(["options"]);
     expect(schema.$defs.field.allOf[0].else.not.required).toEqual(["options"]);
     expect(schema.$defs.delivery.allOf[0].then.required).toEqual(["line"]);
@@ -190,6 +203,23 @@ describe("built CLI", () => {
 
     expect(result.code).toBe(2);
     expect(JSON.parse(result.stdout).error.code).toBe("INVALID_REQUEST");
+  });
+
+  test("oversized requests are rejected before parsing or prompting", async () => {
+    const target = join(directory, "oversized-target.txt");
+    await writeFile(target, "");
+    const result = run(["request", "-"], {
+      stdin: request(target) + " ".repeat(1_048_577),
+      mode: "block",
+      timeout: "0.2",
+    });
+
+    expect(result.code).toBe(2);
+    expect(JSON.parse(result.stdout).error).toEqual({
+      code: "INVALID_REQUEST",
+      message: "request exceeds 1048576 bytes",
+    });
+    expect(await readFile(target, "utf8")).toBe("");
   });
 
   test("unexpected failures return the stable internal error", () => {
@@ -349,24 +379,52 @@ describe("built CLI", () => {
   test("deadline expires while ordered delivery is in progress", async () => {
     const target = join(directory, "blocked-delivery.txt");
     await writeFile(target, "");
-    const count = 2_500;
+    const count = 256;
+    const padding = "x".repeat(3_000);
     const deliveries = Array.from({ length: count }, (_, index) => ({
       id: `delivery-${index}`,
       path: target,
       operation: "append",
-      template: "{{ api_token }}",
+      template: `${padding}{{ api_token }}`,
     }));
-    const result = run(["request", "-"], {
-      stdin: withDeliveries(target, deliveries),
-      mode: "delayed",
-      timeout: "0.2",
+    const timeoutMilliseconds = 1_000;
+    const started = performance.now();
+    const child = Bun.spawn([cli, "request", "-"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...Bun.env,
+        KEY_KONG_PROMPT_EXECUTABLE: fakePrompt,
+        KEY_KONG_FAKE_MODE: "submit",
+        KEY_KONG_TEST_TIMEOUT_SECONDS: "1",
+      },
     });
-    const delivered = await readFile(target, "utf8");
+    child.stdin.write(withDeliveries(target, deliveries));
+    child.stdin.end();
+    const stdout = new Response(child.stdout).text();
+    const stderr = new Response(child.stderr).text();
 
-    expect(result.code).toBe(1);
-    expect(JSON.parse(result.stdout)).toEqual({ status: "expired", values: {} });
+    let delivered = "";
+    for (let attempt = 0; attempt < 750; attempt++) {
+      delivered = await readFile(target, "utf8");
+      if (delivered.length > 0) break;
+      await Bun.sleep(1);
+    }
     expect(delivered.length).toBeGreaterThan(0);
-    expect(delivered.length).toBeLessThan(count * "highly-secret".length);
+    process.kill(child.pid, "SIGSTOP");
+    await Bun.sleep(
+      Math.max(0, started + timeoutMilliseconds - 100 - performance.now()),
+    );
+    process.kill(child.pid, "SIGCONT");
+
+    expect(await child.exited).toBe(1);
+    expect(JSON.parse(await stdout)).toEqual({ status: "expired", values: {} });
+    expect(await stderr).toBe("");
+    delivered = await readFile(target, "utf8");
+    expect(delivered.length).toBeLessThan(
+      count * (padding.length + "highly-secret".length),
+    );
   });
 
   test("blocked helper expires", async () => {
@@ -386,6 +444,41 @@ describe("built CLI", () => {
       await Bun.sleep(10);
     }
     expect(await readFile(marker, "utf8")).toBe("terminated");
+  });
+
+  test("terminating the broker terminates its prompt helper", async () => {
+    const target = join(directory, "terminated-broker-target.txt");
+    const marker = join(directory, "broker-terminated-helper.txt");
+    const ready = join(directory, "broker-ready-helper.txt");
+    await writeFile(target, "");
+    const process = Bun.spawn([cli, "request", "-"], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...Bun.env,
+        KEY_KONG_PROMPT_EXECUTABLE: fakePrompt,
+        KEY_KONG_FAKE_MODE: "block",
+        KEY_KONG_FAKE_MARKER: marker,
+        KEY_KONG_FAKE_READY: ready,
+        KEY_KONG_TEST_TIMEOUT_SECONDS: "5",
+      },
+    });
+    process.stdin.write(request(target));
+    process.stdin.end();
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (await Bun.file(ready).exists()) break;
+      await Bun.sleep(10);
+    }
+    expect(await readFile(ready, "utf8")).toBe("ready");
+    process.kill("SIGTERM");
+    expect(await process.exited).toBe(143);
+    for (let attempt = 0; attempt < 30; attempt++) {
+      if (await Bun.file(marker).exists()) break;
+      await Bun.sleep(10);
+    }
+    expect(await readFile(marker, "utf8")).toBe("terminated");
+    expect(await readFile(target, "utf8")).toBe("");
   });
 
   test("late helper response is discarded", async () => {
