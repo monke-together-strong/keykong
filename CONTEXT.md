@@ -1,28 +1,40 @@
-# Key Kong glossary
+# Key Kong
 
-## Request
+Key Kong brokers blocking requests for user-supplied values while keeping those
+values out of the invoking caller's context.
 
-A blocking request for one or more user-supplied values.
+## Language
 
-## Field
+**Request**:
+A blocking request for one or more user-supplied values and their proposed delivery to a sink.
 
+**Field**:
 A required value collected as part of a request under a stable field ID.
 Response fields may be text, single-select, or multi-select and are returned to
 the caller. Secret fields are delivered but never returned.
 
-## Input adapter
-
-A user interface that presents a request and returns submitted field values to
-the request lifecycle. The default v1 adapter is a native macOS dialog.
-
-## Option
-
+**Option**:
 A select choice with a display-only label and a stable returned value.
 
-## Sink
+**Broker**:
+The trusted component that owns submitted values from collection through delivery and reveals only the outcome and non-secret response values to the caller.
+_Avoid_: Core, coordinator
 
-A declared local destination that receives a request's submitted values.
+**Prompt Adapter**:
+A presentation component that collects a request's fields and returns the submitted values to the broker. It does not know about or deliver to sinks.
+_Avoid_: Input adapter, provider, broker, native adapter
 
-## Delivery
+**Delivery Specification**:
+A request's description of its intended sink and the permitted operation that will deliver submitted values there.
+_Avoid_: Sink configuration, delivery template
 
-The all-or-nothing handoff of a submitted request to its sink.
+**Sink**:
+A request-scoped local destination that receives submitted values after broker validation and user submission.
+_Avoid_: Persistent sink, registered sink
+
+**Submission**:
+The user's authorization to return the collected field values to the broker for delivery to the resolved sink.
+_Avoid_: Confirmation, approval
+
+**Delivery**:
+An ordered attempt to render and write submitted field values to one sink. A request is partial when some deliveries succeed and others fail.

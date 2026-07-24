@@ -1,5 +1,4 @@
 import AppKit
-import KeyKongCore
 
 @MainActor
 final class MacOSInputFormController: NSObject, NSWindowDelegate {
@@ -12,19 +11,15 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
     private(set) var inputViews: [NSView] = []
     private(set) var errorLabels: [String: NSTextField] = [:]
 
-    private let request: InputRequest
-    private let expirationInterval: TimeInterval
-    private let onComplete: (InputOutcome) -> Void
+    private let request: PromptRequest
+    private let onComplete: (PromptOutcome) -> Void
     private var didComplete = false
-    private var expirationTimer: Timer?
 
     init(
-        request: InputRequest,
-        expirationInterval: TimeInterval = 10 * 60,
-        onComplete: @escaping (InputOutcome) -> Void
+        request: PromptRequest,
+        onComplete: @escaping (PromptOutcome) -> Void
     ) {
         self.request = request
-        self.expirationInterval = expirationInterval
         self.onComplete = onComplete
         self.window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 480, height: 540),
@@ -52,7 +47,6 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         window.orderFrontRegardless()
         window.makeFirstResponder(firstFocusableView())
         NSApp.activate(ignoringOtherApps: true)
-        startExpirationTimer()
     }
 
     @objc private func submit() {
@@ -117,10 +111,6 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
 
     @objc private func cancel() {
         finish(with: .cancelled)
-    }
-
-    @objc private func expire() {
-        finish(with: .expired)
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -245,7 +235,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         window.contentView = root
     }
 
-    private func makeInput(for field: InputField) -> NSView {
+    private func makeInput(for field: PromptField) -> NSView {
         switch field.type {
         case .text:
             let textField = NSTextField()
@@ -315,26 +305,11 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         detailsView.isHidden = detailsButton.state != .on
     }
 
-    private func finish(with outcome: InputOutcome) {
+    private func finish(with outcome: PromptOutcome) {
         guard !didComplete else { return }
         didComplete = true
-        expirationTimer?.invalidate()
-        expirationTimer = nil
         clearInputs()
         onComplete(outcome)
-    }
-
-    private func startExpirationTimer() {
-        guard expirationTimer == nil else { return }
-        let timer = Timer(
-            timeInterval: expirationInterval,
-            target: self,
-            selector: #selector(expire),
-            userInfo: nil,
-            repeats: false
-        )
-        RunLoop.main.add(timer, forMode: .common)
-        expirationTimer = timer
     }
 
     private func clearInputs() {
@@ -354,7 +329,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         }
     }
 
-    private static func describe(_ delivery: Delivery) -> String {
+    private static func describe(_ delivery: PromptDelivery) -> String {
         switch delivery.operation {
         case .append:
             return "\(delivery.path) — append"
