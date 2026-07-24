@@ -62,11 +62,18 @@ switch (process.env.KEY_KONG_FAKE_MODE) {
   case "block":
     await new Promise(() => {});
     break;
+  case "resist_termination":
+    process.on("SIGTERM", () => {});
+    await new Promise(() => {});
+    break;
   case "late":
     await Bun.sleep(500);
   case "cancel":
     console.log('{"status":"cancelled"}');
     break;
+  case "cancel_nonzero":
+    console.log('{"status":"cancelled"}');
+    process.exit(9);
   case "malformed":
     console.log("raw-native-secret");
     break;

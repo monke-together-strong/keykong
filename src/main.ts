@@ -1,6 +1,5 @@
 import { requestCommand, type Execution } from "./command";
 import { Deadline, DeadlineExpired } from "./deadline";
-import { deliveryWorkerCommand } from "./delivery";
 import { KeyKongError } from "./errors";
 import { requestSchema } from "./schema";
 
@@ -43,9 +42,6 @@ function failure(error: unknown): Execution {
 }
 
 const args = process.argv.slice(2);
-if (args.length === 1 && args[0] === "__deliver") {
-  process.exit(await deliveryWorkerCommand());
-}
 if (args.length === 1 && args[0] === "schema") {
   console.log(JSON.stringify(requestSchema));
   process.exit(0);

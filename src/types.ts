@@ -35,6 +35,12 @@ export interface PromptRequest {
   deliveries: Array<Pick<Delivery, "path" | "operation" | "line">>;
 }
 
+export interface DeliveryWorkerRequest {
+  deliveries: Delivery[];
+  values: Record<string, ResponseValue>;
+  targets: Array<[string, { dev: string; ino: string }]>;
+}
+
 export type PromptResponse =
   | { status: "submitted"; values: Record<string, ResponseValue> }
   | { status: "cancelled" };

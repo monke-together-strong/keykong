@@ -49,8 +49,13 @@ export async function prompt(
       new Response(
         subprocess.stdout as ReadableStream<Uint8Array>,
       ).text(),
-      () => subprocess.kill(),
+      () => subprocess.kill(9),
     );
+    const exitCode = await deadline.run(
+      subprocess.exited,
+      () => subprocess.kill(9),
+    );
+    if (exitCode !== 0) throw new Error();
 
     const response: unknown = JSON.parse(output);
     if (!response || typeof response !== "object" || Array.isArray(response)) {
@@ -61,12 +66,6 @@ export async function prompt(
       candidate.status === "cancelled" &&
       Object.keys(candidate).length === 1
     ) {
-      if (subprocess.exitCode === null) {
-        subprocess.kill();
-        await subprocess.exited;
-      } else if (subprocess.exitCode !== 0) {
-        throw new Error();
-      }
       return { status: "cancelled" };
     }
     if (
@@ -74,14 +73,15 @@ export async function prompt(
       Object.keys(candidate).length === 2 &&
       "values" in candidate
     ) {
-      if (await deadline.run(subprocess.exited, () => subprocess.kill()) !== 0) {
-        throw new Error();
-      }
       return candidate as unknown as PromptResponse;
     }
     throw new Error();
   } catch (error) {
-    if (error instanceof DeadlineExpired) throw error;
+    if (error instanceof DeadlineExpired) {
+      subprocess.kill(9);
+      await subprocess.exited;
+      throw error;
+    }
     throw new KeyKongError(
       "PROMPT_FAILED",
       "native prompt returned an invalid response",

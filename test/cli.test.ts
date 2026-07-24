@@ -104,7 +104,6 @@ function run(
     marker?: string;
     pidMarker?: string;
     deadlineMS?: number;
-    blockWriteMS?: number;
     internalFailure?: boolean;
   } = {},
 ) {
@@ -124,9 +123,6 @@ function run(
         : {}),
       ...(options.deadlineMS
         ? { KEY_KONG_TEST_DEADLINE_MS: String(options.deadlineMS) }
-        : {}),
-      ...(options.blockWriteMS
-        ? { KEY_KONG_TEST_BLOCK_WRITE_MS: String(options.blockWriteMS) }
         : {}),
       ...(options.internalFailure
         ? { KEY_KONG_TEST_INTERNAL_FAILURE: "1" }
@@ -200,12 +196,39 @@ describe("built CLI response request", () => {
     expect(result.stdout).toBe('{"status":"cancelled","values":{}}\n');
   });
 
+  test("cancellation requires a clean helper exit", () => {
+    const result = run(["request", "-"], {
+      stdin: request(),
+      mode: "cancel_nonzero",
+    });
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout).error.code).toBe("PROMPT_FAILED");
+  });
+
   test("a blocked helper is terminated at the whole-request deadline", async () => {
     const pidMarker = join(directory, "blocked-helper.pid");
     const started = performance.now();
     const result = run(["request", "-"], {
       stdin: request(),
       mode: "block",
+      deadlineMS: 100,
+      pidMarker,
+    });
+
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe('{"status":"expired","values":{}}\n');
+    const helperPID = Number(await readFile(pidMarker, "utf8"));
+    expect(() => process.kill(helperPID, 0)).toThrow();
+  });
+
+  test("a helper resisting graceful termination is forcefully reaped", async () => {
+    const pidMarker = join(directory, "resistant-helper.pid");
+    const started = performance.now();
+    const result = run(["request", "-"], {
+      stdin: request(),
+      mode: "resist_termination",
       deadlineMS: 100,
       pidMarker,
     });
@@ -521,15 +544,26 @@ describe("built CLI response request", () => {
 
   test("deadline covers delivery work", async () => {
     const target = join(directory, "blocked-delivery.txt");
+    const pidMarker = join(directory, "delivery-worker.pid");
     await writeFile(target, "");
-    const result = run(["request", "-"], {
-      stdin: deliveryRequest(target),
-      deadlineMS: 100,
-      blockWriteMS: 200,
+    const child = Bun.spawn([cli, "request", "-"], {
+      stdin: new TextEncoder().encode(deliveryRequest(target)),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...Bun.env,
+        KEY_KONG_PROMPT_EXECUTABLE: fakePrompt,
+        KEY_KONG_TEST_DEADLINE_MS: "100",
+        KEY_KONG_TEST_BLOCK_WRITE_MS: "200",
+        KEY_KONG_TEST_DELIVERY_PID_MARKER: pidMarker,
+      },
     });
 
-    expect(result.code).toBe(1);
-    expect(result.stdout).toBe('{"status":"expired","values":{}}\n');
+    expect(await child.exited).toBe(1);
+    expect(await new Response(child.stdout).text()).toBe(
+      '{"status":"expired","values":{}}\n',
+    );
+    expect(Number(await readFile(pidMarker, "utf8"))).toBe(child.pid);
     await Bun.sleep(250);
     expect(await readFile(target, "utf8")).toBe("");
   });
@@ -597,6 +631,7 @@ printf '%s\\n' '{"status":"submitted","values":{"environment":"prod","region":"u
         "--outfile",
         productionCLI,
         join(root, "src/main.ts"),
+        join(root, "src/delivery-worker.ts"),
       ],
       { stdout: "pipe", stderr: "pipe" },
     );
