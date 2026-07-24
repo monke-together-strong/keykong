@@ -1,13 +1,8 @@
-import { requestLimits } from "./limits";
-
 export const requestSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: "https://key-kong.dev/schema/request-v1.json",
   title: "Key Kong request",
-  description:
-    `Serialized requests are limited to ${requestLimits.bytes} UTF-8 bytes. ` +
-    "The CLI also validates unique IDs, field references, secret delivery, " +
-    "target accessibility and identity, and insertion-line bounds.",
+  description: "Version 1 request contract for Key Kong.",
   type: "object",
   additionalProperties: false,
   required: ["schemaVersion", "id", "title", "fields"],
@@ -18,12 +13,10 @@ export const requestSchema = {
     fields: {
       type: "array",
       minItems: 1,
-      maxItems: requestLimits.fields,
       items: { $ref: "#/$defs/field" },
     },
     deliveries: {
       type: "array",
-      maxItems: requestLimits.deliveries,
       items: { $ref: "#/$defs/delivery" },
     },
   },
@@ -58,7 +51,6 @@ export const requestSchema = {
         options: {
           type: "array",
           minItems: 1,
-          maxItems: requestLimits.optionsPerField,
           items: { $ref: "#/$defs/option" },
         },
       },

@@ -9,5 +9,3 @@ export class KeyKongError extends Error {
     super(message);
   }
 }
-
-export class ExpiredError extends Error {}

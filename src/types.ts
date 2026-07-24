@@ -39,16 +39,10 @@ export type PromptResponse =
   | { status: "submitted"; values: Record<string, ResponseValue> }
   | { status: "cancelled" };
 
-export type ErrorCode =
-  | "CLI_USAGE"
-  | "INVALID_REQUEST"
-  | "PROMPT_FAILED"
-  | "DELIVERY_FAILED"
-  | "INTERNAL_FAILURE";
+export type ErrorCode = "CLI_USAGE" | "INVALID_REQUEST" | "PROMPT_FAILED";
 
 export interface Result {
-  status: "completed" | "partial" | "failed" | "cancelled" | "expired";
+  status: "completed" | "failed" | "cancelled";
   values: Record<string, ResponseValue>;
-  failedDeliveries?: string[];
   error?: { code: ErrorCode; message: string };
 }
