@@ -24,6 +24,7 @@ final class DemoController: NSObject {
         window.isReleasedWhenClosed = false
         window.contentView = formView()
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -105,7 +106,7 @@ final class DemoController: NSObject {
 }
 
 let app = NSApplication.shared
-app.setActivationPolicy(.accessory)
+app.setActivationPolicy(.regular)
 let controller = DemoController()
 controller.show()
 app.run()
