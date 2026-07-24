@@ -5,6 +5,7 @@ import {
   mkdtemp,
   readFile,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -48,6 +49,51 @@ function request() {
       },
     ],
   });
+}
+
+function deliveryRequest(path: string) {
+  return JSON.stringify({
+    schemaVersion: 1,
+    id: "deploy-secret",
+    title: "Deploy secret",
+    fields: [
+      { id: "environment", label: "Environment", type: "text" },
+      {
+        id: "region",
+        label: "Region",
+        type: "select",
+        options: [{ label: "Oregon", value: "us-west-2" }],
+      },
+      {
+        id: "features",
+        label: "Features",
+        type: "multi_select",
+        options: [
+          { label: "Audit", value: "audit" },
+          { label: "Alerts", value: "alerts" },
+        ],
+      },
+      { id: "api_token", label: "API token", type: "secret" },
+    ],
+    deliveries: [
+      {
+        id: "config",
+        path,
+        operation: "append",
+        template:
+          "{{ environment }} {{ region }} {{ features }} {{ api_token }}\n",
+      },
+    ],
+  });
+}
+
+function withDeliveries(
+  path: string,
+  deliveries: Array<Record<string, unknown>>,
+) {
+  const value = JSON.parse(deliveryRequest(path));
+  value.deliveries = deliveries;
+  return JSON.stringify(value);
 }
 
 function run(
@@ -145,7 +191,7 @@ describe("built CLI response request", () => {
     expect(await Bun.file(marker).exists()).toBeFalse();
   });
 
-  test("delivery and secret execution remain outside this response-only slice", async () => {
+  test("a secret without a delivery is rejected before launching the helper", async () => {
     const marker = join(directory, "unsupported-launched");
     const input = JSON.stringify({
       schemaVersion: 1,
@@ -160,6 +206,227 @@ describe("built CLI response request", () => {
     expect(result.code).toBe(2);
     expect(JSON.parse(result.stdout).error.code).toBe("INVALID_REQUEST");
     expect(await Bun.file(marker).exists()).toBeFalse();
+  });
+
+  test("delivery renders every field kind and omits the secret from results", async () => {
+    const target = join(directory, "completed.txt");
+    await writeFile(target, "");
+
+    const result = run(["request", "-"], { stdin: deliveryRequest(target) });
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(
+      '{"status":"completed","values":{"environment":"prod","region":"us-west-2","features":["audit","alerts"]}}\n',
+    );
+    expect(result.stdout + result.stderr).not.toContain("highly-secret");
+    expect(await readFile(target, "utf8")).toBe(
+      'prod us-west-2 ["audit","alerts"] highly-secret\n',
+    );
+  });
+
+  test("ordered append and insert deliveries affect the same target", async () => {
+    const target = join(directory, "ordered.txt");
+    await writeFile(target, "first\nthird\n");
+    const input = withDeliveries(target, [
+      {
+        id: "insert",
+        path: target,
+        operation: "insert_line",
+        line: 2,
+        template: "{{ environment }}",
+      },
+      {
+        id: "append",
+        path: target,
+        operation: "append",
+        template: "{{ region }} {{ api_token }}",
+      },
+    ]);
+
+    const result = run(["request", "-"], { stdin: input });
+
+    expect(result.code).toBe(0);
+    expect(await readFile(target, "utf8")).toBe(
+      "first\nprod\nthird\nus-west-2 highly-secret",
+    );
+  });
+
+  test("target replacement returns partial after retaining completed deliveries", async () => {
+    const first = join(directory, "partial-first.txt");
+    const second = join(directory, "partial-second.txt");
+    await writeFile(first, "");
+    await writeFile(second, "");
+    const input = withDeliveries(first, [
+      {
+        id: "first",
+        path: first,
+        operation: "append",
+        template: "{{ environment }}",
+      },
+      {
+        id: "second",
+        path: second,
+        operation: "append",
+        template: "{{ api_token }}",
+      },
+    ]);
+
+    const result = run(["request", "-"], {
+      stdin: input,
+      mode: "replace_last",
+    });
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout)).toEqual({
+      status: "partial",
+      values: {
+        environment: "prod",
+        region: "us-west-2",
+        features: ["audit", "alerts"],
+      },
+      failedDeliveries: ["second"],
+      error: { code: "DELIVERY_FAILED", message: "some deliveries failed" },
+    });
+    expect(await readFile(first, "utf8")).toBe("prod");
+    expect(await readFile(second, "utf8")).toBe("");
+    expect(result.stdout + result.stderr).not.toContain("highly-secret");
+  });
+
+  test("all failed deliveries return failed without delivery IDs", async () => {
+    const target = join(directory, "all-failed.txt");
+    await writeFile(target, "");
+
+    const result = run(["request", "-"], {
+      stdin: deliveryRequest(target),
+      mode: "replace_last",
+    });
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout)).toEqual({
+      status: "failed",
+      values: {
+        environment: "prod",
+        region: "us-west-2",
+        features: ["audit", "alerts"],
+      },
+      error: { code: "DELIVERY_FAILED", message: "all deliveries failed" },
+    });
+    expect(await readFile(target, "utf8")).toBe("");
+  });
+
+  test("delivery policy is validated before launching the helper", async () => {
+    const target = join(directory, "validated.txt");
+    const link = join(directory, "validated-link.txt");
+    await writeFile(target, "one\n");
+    await symlink(target, link);
+    const cases = [
+      {
+        name: "invalid delivery ID",
+        input: withDeliveries(target, [
+          {
+            id: "not valid",
+            path: target,
+            operation: "append",
+            template: "{{ api_token }}",
+          },
+        ]),
+      },
+      {
+        name: "unknown template field",
+        input: withDeliveries(target, [
+          {
+            id: "unknown",
+            path: target,
+            operation: "append",
+            template: "{{ missing }}",
+          },
+        ]),
+      },
+      {
+        name: "relative target",
+        input: withDeliveries(target, [
+          {
+            id: "relative",
+            path: "relative.txt",
+            operation: "append",
+            template: "{{ api_token }}",
+          },
+        ]),
+      },
+      {
+        name: "symlink target",
+        input: withDeliveries(target, [
+          {
+            id: "symlink",
+            path: link,
+            operation: "append",
+            template: "{{ api_token }}",
+          },
+        ]),
+      },
+      {
+        name: "invalid insertion line",
+        input: withDeliveries(target, [
+          {
+            id: "line",
+            path: target,
+            operation: "insert_line",
+            line: 3,
+            template: "{{ api_token }}",
+          },
+        ]),
+      },
+    ];
+
+    for (const testCase of cases) {
+      const marker = join(
+        directory,
+        `validation-${testCase.name.replaceAll(" ", "-")}`,
+      );
+      const result = run(["request", "-"], {
+        stdin: testCase.input,
+        marker,
+      });
+      expect(JSON.parse(result.stdout).error.code).toBe("INVALID_REQUEST");
+      expect(await Bun.file(marker).exists()).toBeFalse();
+    }
+    expect(await readFile(target, "utf8")).toBe("one\n");
+  });
+
+  test("delivery inherits the caller sandbox", async () => {
+    const target = join(directory, "sandbox-target.txt");
+    const profile = join(directory, "sandbox.profile");
+    await writeFile(target, "unchanged\n");
+    await writeFile(
+      profile,
+      [
+        "(version 1)",
+        "(deny default)",
+        "(allow process*)",
+        "(allow file-read*)",
+        "(allow sysctl-read)",
+      ].join("\n"),
+    );
+
+    const result = Bun.spawnSync(
+      ["/usr/bin/sandbox-exec", "-f", profile, cli, "request", "-"],
+      {
+        stdin: new TextEncoder().encode(deliveryRequest(target)),
+        stdout: "pipe",
+        stderr: "pipe",
+        env: {
+          ...Bun.env,
+          KEY_KONG_PROMPT_EXECUTABLE: fakePrompt,
+          KEY_KONG_FAKE_MODE: "submit",
+        },
+      },
+    );
+
+    expect(result.exitCode).toBe(2);
+    expect(JSON.parse(result.stdout.toString()).error.code).toBe(
+      "INVALID_REQUEST",
+    );
+    expect(await readFile(target, "utf8")).toBe("unchanged\n");
   });
 
   test("invalid helper output becomes a machine-readable prompt failure", () => {

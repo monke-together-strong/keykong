@@ -137,6 +137,9 @@ final class MacOSInputFormTests: XCTestCase {
             outcome,
             .submitted(["api_token": .text("highly-secret")])
         )
+        XCTAssertEqual(secretInput.secureTextField.stringValue, "")
+        XCTAssertEqual(secretInput.revealedTextField.stringValue, "")
+        XCTAssertEqual(secretInput.revealButton.state, .off)
     }
 
     func testFormPresentsAndSubmitsRequiredFieldsInRequestOrder() throws {

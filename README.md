@@ -39,15 +39,15 @@ The CLI also provides `schema`, `--help`, and `--version`. The `request`
 command writes exactly one newline-terminated JSON object to standard output.
 
 See [the request schema](docs/request-schema.md) for the versioned contract.
-This slice executes response-only requests with required text, single-select,
-and multi-select fields. Secret delivery and filesystem behavior remain with
-the fallback until the next migration slice.
+The Bun path supports required text, secret, single-select, and multi-select
+fields plus ordered append and insert-before-line deliveries to existing
+absolute-path files.
 
 ## Architecture
 
-Bun owns response-request decoding and validation, prompt projection, submission
-validation, result shaping, and exit behavior. The Swift executable receives
-presentation-only JSON on standard input and returns one submission or
-cancellation JSON object on standard output. The protocol already represents
-secret fields and sanitized delivery details without giving the Prompt Adapter
-delivery behavior.
+Bun owns request decoding, validation, prompt projection, submission validation,
+template rendering, filesystem delivery, result shaping, and exit behavior. The
+Swift executable receives presentation-only JSON on standard input and returns
+one submission or cancellation JSON object on standard output. It sees
+sanitized delivery paths, operations, and insertion lines, but never templates
+or delivery behavior.
