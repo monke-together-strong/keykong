@@ -100,6 +100,19 @@ switch (process.env.KEY_KONG_FAKE_MODE) {
       }),
     );
     break;
+  case "empty":
+    console.log(
+      JSON.stringify({
+        status: "submitted",
+        values: {
+          environment: "",
+          region: "us-west-2",
+          features: ["audit"],
+          ...(request.title === "Deploy secret" ? { api_token: "" } : {}),
+        },
+      }),
+    );
+    break;
   case "replace_last": {
     const target = request.deliveries.at(-1).path;
     await Bun.file(target).delete();

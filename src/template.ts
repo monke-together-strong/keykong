@@ -5,15 +5,28 @@ const fieldReference =
 
 export function parseTemplate(
   template: string,
-): { references: string[]; literal: string } | undefined {
+): {
+  references: string[];
+  literal: string;
+  trailingLiteral: string;
+} | undefined {
   const references: string[] = [];
-  const literal = template.replace(fieldReference, (_, fieldID: string) => {
-    references.push(fieldID);
-    return "";
-  });
+  let trailingLiteralStart = 0;
+  const literal = template.replace(
+    fieldReference,
+    (match: string, fieldID: string, offset: number) => {
+      references.push(fieldID);
+      trailingLiteralStart = offset + match.length;
+      return "";
+    },
+  );
   return literal.includes("{{") || literal.includes("}}")
     ? undefined
-    : { references, literal };
+    : {
+      references,
+      literal,
+      trailingLiteral: template.slice(trailingLiteralStart),
+    };
 }
 
 export function renderTemplate(

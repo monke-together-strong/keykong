@@ -1,5 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
+  closeSync,
+  constants,
+  openSync,
+  writeSync,
+} from "node:fs";
+import {
   chmod,
   mkdir,
   mkdtemp,
@@ -162,6 +168,9 @@ describe("built CLI response request", () => {
       "operation",
       "template",
     ]);
+    expect(schema.properties.fields.maxItems).toBe(256);
+    expect(schema.properties.deliveries.maxItems).toBe(256);
+    expect(schema.$defs.field.properties.options.maxItems).toBe(256);
     expect(run(["--help"]).stdout).toContain("key-kong request <file|->");
     expect(run(["--version"]).stdout).toBe("key-kong 1.0.0\n");
   });
@@ -262,6 +271,21 @@ describe("built CLI response request", () => {
     expect(await Bun.file(marker).exists()).toBeFalse();
   });
 
+  test("oversized requests are rejected before parsing or prompting", async () => {
+    const marker = join(directory, "oversized-launched");
+    const result = run(["request", "-"], {
+      stdin: request() + " ".repeat(1_048_577),
+      marker,
+    });
+
+    expect(result.code).toBe(2);
+    expect(JSON.parse(result.stdout).error).toEqual({
+      code: "INVALID_REQUEST",
+      message: "request exceeds 1048576 bytes",
+    });
+    expect(await Bun.file(marker).exists()).toBeFalse();
+  });
+
   test("a secret without a delivery is rejected before launching the helper", async () => {
     const marker = join(directory, "unsupported-launched");
     const input = JSON.stringify({
@@ -319,6 +343,34 @@ describe("built CLI response request", () => {
     expect(result.code).toBe(0);
     expect(await readFile(target, "utf8")).toBe(
       "first\nprod\nthird\nus-west-2 highly-secret",
+    );
+  });
+
+  test("line simulation accounts for an inserted template ending in a field", async () => {
+    const target = join(directory, "rendered-lines.txt");
+    await writeFile(target, "one\n");
+    const input = withDeliveries(target, [
+      {
+        id: "first",
+        path: target,
+        operation: "insert_line",
+        line: 2,
+        template: "header\n{{ api_token }}",
+      },
+      {
+        id: "second",
+        path: target,
+        operation: "insert_line",
+        line: 4,
+        template: "{{ environment }}",
+      },
+    ]);
+
+    const result = run(["request", "-"], { stdin: input });
+
+    expect(result.code).toBe(0);
+    expect(await readFile(target, "utf8")).toBe(
+      "one\nheader\nhighly-secret\nprod\n",
     );
   });
 
@@ -511,6 +563,20 @@ describe("built CLI response request", () => {
     expect(result.stdout).not.toContain("not-json");
   });
 
+  test("empty submitted fields fail before delivery", async () => {
+    const target = join(directory, "empty-submission.txt");
+    await writeFile(target, "unchanged\n");
+
+    const result = run(["request", "-"], {
+      stdin: deliveryRequest(target),
+      mode: "empty",
+    });
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout).error.code).toBe("PROMPT_FAILED");
+    expect(await readFile(target, "utf8")).toBe("unchanged\n");
+  });
+
   test("native helper faults return sanitized prompt failures", () => {
     for (const mode of ["malformed", "extra", "eof", "nonzero", "crash"]) {
       const result = run(["request", "-"], { stdin: request(), mode });
@@ -587,6 +653,40 @@ describe("built CLI response request", () => {
     ]);
     if (exitCode === -1) child.kill();
     expect(exitCode).not.toBe(-1);
+  });
+
+  test("blocked expired-result output cannot extend the process deadline", async () => {
+    const fifo = join(directory, "blocked-expired-output.fifo");
+    expect(Bun.spawnSync(["mkfifo", fifo]).exitCode).toBe(0);
+    const descriptor = openSync(
+      fifo,
+      constants.O_RDWR | constants.O_NONBLOCK,
+    );
+    const chunk = Buffer.alloc(16 * 1024);
+    try {
+      while (true) writeSync(descriptor, chunk);
+    } catch {
+      // The full pipe is the fixture.
+    }
+
+    const child = Bun.spawn([cli, "request", "-"], {
+      stdin: "pipe",
+      stdout: descriptor,
+      stderr: "pipe",
+      env: {
+        ...Bun.env,
+        KEY_KONG_PROMPT_EXECUTABLE: fakePrompt,
+        KEY_KONG_TEST_DEADLINE_MS: "100",
+      },
+    });
+    const exitCode = await Promise.race([
+      child.exited,
+      Bun.sleep(1_000).then(() => -1),
+    ]);
+    if (exitCode === -1) child.kill();
+    closeSync(descriptor);
+
+    expect(exitCode).toBe(1);
   });
 
   test("unexpected failures use the stable internal error category", () => {

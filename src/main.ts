@@ -58,21 +58,24 @@ if (args.length === 1 && args[0] === "--version") {
 const configuredTimeout = KEY_KONG_TESTING
   ? Number(process.env.KEY_KONG_TEST_DEADLINE_MS) || 10 * 60 * 1_000
   : 10 * 60 * 1_000;
-const deadline = new Deadline(configuredTimeout);
+const processDeadline = new Deadline(configuredTimeout);
+const outputMarginMS = Math.min(250, configuredTimeout / 2);
+const workDeadline = new Deadline(configuredTimeout - outputMarginMS);
 
 let execution: Execution;
 try {
-  execution = await requestCommand(args, deadline);
+  execution = await requestCommand(args, workDeadline);
 } catch (error) {
   execution = failure(error);
 }
-if (execution.result.error) {
-  process.stderr.write(`${execution.result.error.message}\n`);
-}
 const output = `${JSON.stringify(execution.result)}\n`;
 try {
-  const write = Bun.write(Bun.stdout, output);
-  await (execution.result.status === "expired" ? write : deadline.run(write));
+  await processDeadline.run(Bun.write(Bun.stdout, output));
+  if (execution.result.error) {
+    await processDeadline.run(
+      Bun.write(Bun.stderr, `${execution.result.error.message}\n`),
+    );
+  }
 } catch (error) {
   if (error instanceof DeadlineExpired) process.exit(1);
   throw error;

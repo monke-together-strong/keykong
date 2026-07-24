@@ -1,5 +1,7 @@
 import { isAbsolute } from "node:path";
+import { DeadlineExpired, type Deadline } from "./deadline";
 import { KeyKongError } from "./errors";
+import { requestLimits } from "./limits";
 import { parseTemplate } from "./template";
 import { openTarget, type TargetIdentity } from "./target";
 import type {
@@ -62,7 +64,8 @@ function requireID(
   }
 }
 
-function validateField(value: unknown): Field {
+function validateField(value: unknown, deadline: Deadline): Field {
+  deadline.assertActive();
   const field = requireObject(value, "field");
   exactKeys(
     field,
@@ -84,8 +87,14 @@ function validateField(value: unknown): Field {
     if (!Array.isArray(field.options) || field.options.length === 0) {
       invalid(`field '${field.id}' must define at least one option`);
     }
+    if (field.options.length > requestLimits.optionsPerField) {
+      invalid(
+        `field '${field.id}' must define at most ${requestLimits.optionsPerField} options`,
+      );
+    }
     const optionValues = new Set<string>();
     for (const rawOption of field.options) {
+      deadline.assertActive();
       const option = requireObject(
         rawOption,
         `field '${field.id}' option`,
@@ -110,7 +119,14 @@ function validateField(value: unknown): Field {
 function validateDelivery(
   value: unknown,
   fields: Map<string, Field>,
-): { delivery: Delivery; references: string[]; literal: string } {
+  deadline: Deadline,
+): {
+  delivery: Delivery;
+  references: string[];
+  literal: string;
+  trailingLiteral: string;
+} {
+  deadline.assertActive();
   const delivery = requireObject(value, "delivery");
   exactKeys(
     delivery,
@@ -142,12 +158,14 @@ function validateDelivery(
   }
 
   const parsed = parseTemplate(delivery.template);
+  deadline.assertActive();
   if (!parsed || parsed.references.length === 0) {
     invalid(
       `delivery '${delivery.id}' template must contain valid field references`,
     );
   }
   for (const reference of parsed.references) {
+    deadline.assertActive();
     if (!fields.has(reference)) {
       invalid(
         `delivery '${delivery.id}' references unknown field '${reference}'`,
@@ -158,25 +176,36 @@ function validateDelivery(
     delivery: delivery as unknown as Delivery,
     references: parsed.references,
     literal: parsed.literal,
+    trailingLiteral: parsed.trailingLiteral,
   };
 }
 
 async function inspectTarget(
   delivery: Delivery,
+  deadline: Deadline,
 ): Promise<{ identity: TargetIdentity; lines: number }> {
   try {
-    const { handle, identity } = await openTarget(delivery.path);
+    const { handle, identity } = await deadline.run(openTarget(delivery.path));
     try {
-      const content = await handle.readFile();
       let lines = 1;
-      for (const byte of content) {
-        if (byte === 10) lines++;
+      const buffer = Buffer.allocUnsafe(64 * 1024);
+      let position = 0;
+      while (true) {
+        const { bytesRead } = await deadline.run(
+          handle.read(buffer, 0, buffer.length, position),
+        );
+        if (bytesRead === 0) break;
+        position += bytesRead;
+        for (let index = 0; index < bytesRead; index++) {
+          if (buffer[index] === 10) lines++;
+        }
       }
       return { identity, lines };
     } finally {
       await handle.close();
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof DeadlineExpired) throw error;
     invalid(
       `delivery '${delivery.id}' target must be an existing readable and writable regular file`,
     );
@@ -186,21 +215,34 @@ async function inspectTarget(
 function simulateDelivery(
   delivery: Delivery,
   literal: string,
+  trailingLiteral: string,
   lines: number,
 ): number {
   if (delivery.operation === "insert_line" && delivery.line! > lines) {
     invalid(`delivery '${delivery.id}' line is outside the target`);
   }
   const addedNewlines = [...literal].filter((value) => value === "\n").length;
+  // Every field value accepted by validateSubmission renders at least one
+  // non-newline byte, so only the literal after the final reference can make
+  // the rendered template end in a newline.
   return lines +
     addedNewlines +
-    (delivery.operation === "insert_line" && !literal.endsWith("\n") ? 1 : 0);
+    (
+        delivery.operation === "insert_line" &&
+          !trailingLiteral.endsWith("\n")
+      ? 1
+      : 0
+    );
 }
 
-export async function validateRequest(raw: unknown): Promise<{
+export async function validateRequest(
+  raw: unknown,
+  deadline: Deadline,
+): Promise<{
   request: Request;
   targets: Map<string, TargetIdentity>;
 }> {
+  deadline.assertActive();
   const value = requireObject(raw, "request");
   exactKeys(
     value,
@@ -214,15 +256,24 @@ export async function validateRequest(raw: unknown): Promise<{
   if (!Array.isArray(value.fields) || value.fields.length === 0) {
     invalid("at least one field is required");
   }
+  if (value.fields.length > requestLimits.fields) {
+    invalid(`at most ${requestLimits.fields} fields are allowed`);
+  }
   if ("deliveries" in value && !Array.isArray(value.deliveries)) {
     invalid("deliveries must be an array");
   }
+  if (
+    Array.isArray(value.deliveries) &&
+    value.deliveries.length > requestLimits.deliveries
+  ) {
+    invalid(`at most ${requestLimits.deliveries} deliveries are allowed`);
+  }
 
-  const fields = value.fields.map(validateField);
+  const fields = value.fields.map((field) => validateField(field, deadline));
   const fieldsByID = new Map(fields.map((field) => [field.id, field]));
   if (fieldsByID.size !== fields.length) invalid("field IDs must be unique");
   const validatedDeliveries = ((value.deliveries ?? []) as unknown[]).map((delivery) =>
-    validateDelivery(delivery, fieldsByID)
+    validateDelivery(delivery, fieldsByID, deadline)
   );
   const deliveries = validatedDeliveries.map(({ delivery }) => delivery);
   if (
@@ -236,6 +287,7 @@ export async function validateRequest(raw: unknown): Promise<{
     validatedDeliveries.flatMap(({ references }) => references),
   );
   for (const field of fields) {
+    deadline.assertActive();
     if (field.type === "secret" && !referencedFields.has(field.id)) {
       invalid(
         `secret field '${field.id}' must be referenced by a delivery's template`,
@@ -249,14 +301,16 @@ export async function validateRequest(raw: unknown): Promise<{
     { identity: TargetIdentity; lines: number }
   >();
   for (const [index, delivery] of deliveries.entries()) {
+    deadline.assertActive();
     const target = inspectedTargets.get(delivery.path) ??
-      await inspectTarget(delivery);
+      await inspectTarget(delivery, deadline);
     targets.set(delivery.id, target.identity);
     inspectedTargets.set(delivery.path, {
       identity: target.identity,
       lines: simulateDelivery(
         delivery,
         validatedDeliveries[index]!.literal,
+        validatedDeliveries[index]!.trailingLiteral,
         target.lines,
       ),
     });

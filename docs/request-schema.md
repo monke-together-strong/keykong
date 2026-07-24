@@ -17,6 +17,10 @@ rendered templates or insert them before an existing line in an absolute,
 existing readable and writable regular file. Every secret field must be
 referenced by at least one delivery.
 
+The serialized request is limited to 1 MiB. A request may contain at most 256
+fields and 256 deliveries, and each select field may contain at most 256
+options.
+
 ```json
 {
   "schemaVersion": 1,

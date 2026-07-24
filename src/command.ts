@@ -1,6 +1,7 @@
 import { KeyKongError } from "./errors";
 import { DeadlineExpired, type Deadline } from "./deadline";
 import { deliver } from "./delivery";
+import { requestLimits } from "./limits";
 import { prompt } from "./prompt";
 import type { Result } from "./types";
 import { validateRequest, validateSubmission } from "./validation";
@@ -17,14 +18,37 @@ function usage(): never {
 }
 
 async function readRequest(source: string, deadline: Deadline): Promise<string> {
+  const reader = (source === "-" ? Bun.stdin : Bun.file(source))
+    .stream()
+    .getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
   try {
-    return await deadline.run(
-      source === "-" ? Bun.stdin.text() : Bun.file(source).text(),
-    );
+    while (true) {
+      const { done, value } = await deadline.run(
+        reader.read(),
+        () => void reader.cancel(),
+      );
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > requestLimits.bytes) {
+        await reader.cancel();
+        throw new KeyKongError(
+          "INVALID_REQUEST",
+          `request exceeds ${requestLimits.bytes} bytes`,
+          2,
+        );
+      }
+      chunks.push(value);
+    }
   } catch (error) {
     if (error instanceof DeadlineExpired) throw error;
+    if (error instanceof KeyKongError) throw error;
     throw new KeyKongError("INVALID_REQUEST", "request could not be read", 2);
+  } finally {
+    reader.releaseLock();
   }
+  return Buffer.concat(chunks, bytes).toString("utf8");
 }
 
 export async function requestCommand(
@@ -33,14 +57,18 @@ export async function requestCommand(
 ): Promise<Execution> {
   if (args.length !== 2 || args[0] !== "request") usage();
   const text = await readRequest(args[1]!, deadline);
+  deadline.assertActive();
   let raw: unknown;
   try {
     raw = JSON.parse(text);
   } catch {
     throw new KeyKongError("INVALID_REQUEST", "request is not valid JSON", 2);
   }
+  deadline.assertActive();
 
-  const { request, targets } = await deadline.run(validateRequest(raw));
+  const { request, targets } = await deadline.run(
+    validateRequest(raw, deadline),
+  );
   if (KEY_KONG_TESTING && process.env.KEY_KONG_TEST_INTERNAL_FAILURE) {
     throw new Error("forced internal failure");
   }
@@ -49,6 +77,7 @@ export async function requestCommand(
     return { result: { status: "cancelled", values: {} }, exitCode: 1 };
   }
 
+  deadline.assertActive();
   const values = validateSubmission(response.values, request);
   for (const fieldID of Object.keys(response.values)) {
     delete response.values[fieldID];
