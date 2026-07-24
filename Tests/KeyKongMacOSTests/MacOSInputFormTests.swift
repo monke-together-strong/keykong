@@ -5,6 +5,69 @@ import XCTest
 
 @MainActor
 final class MacOSInputFormTests: XCTestCase {
+    func testSecretFieldIsMaskedCanBeRevealedAndDetailsStaySanitized() throws {
+        let request = InputRequest(
+            id: "credential-input",
+            title: "Add credentials",
+            fields: [
+                InputField(id: "api_token", label: "API token", type: .secret)
+            ],
+            deliveries: [
+                Delivery(
+                    id: "append-token",
+                    path: "/tmp/existing.env",
+                    operation: .append,
+                    template: "TOKEN={{ api_token }}"
+                ),
+                Delivery(
+                    id: "insert-token",
+                    path: "/tmp/settings",
+                    operation: .insertLine,
+                    line: 2,
+                    template: "{{ api_token }}"
+                )
+            ]
+        )
+        var outcome: InputOutcome?
+        let form = MacOSInputFormController(request: request) {
+            outcome = $0
+        }
+
+        let secretInput = try XCTUnwrap(form.inputViews.first as? SecretInputView)
+        XCTAssertFalse(secretInput.secureTextField.isHidden)
+        XCTAssertTrue(secretInput.revealedTextField.isHidden)
+        secretInput.secureTextField.stringValue = "highly-secret"
+
+        secretInput.revealButton.performClick(nil)
+
+        XCTAssertTrue(secretInput.secureTextField.isHidden)
+        XCTAssertFalse(secretInput.revealedTextField.isHidden)
+        XCTAssertEqual(secretInput.revealedTextField.stringValue, "highly-secret")
+        secretInput.revealButton.performClick(nil)
+        XCTAssertFalse(secretInput.secureTextField.isHidden)
+        XCTAssertTrue(secretInput.revealedTextField.isHidden)
+        XCTAssertEqual(secretInput.secureTextField.stringValue, "highly-secret")
+        XCTAssertTrue(form.detailsView.isHidden)
+        XCTAssertEqual(
+            form.deliveryDetails,
+            [
+                "/tmp/existing.env — append",
+                "/tmp/settings — insert before line 2"
+            ]
+        )
+        XCTAssertFalse(form.deliveryDetails.joined().contains("TOKEN="))
+        XCTAssertFalse(form.deliveryDetails.joined().contains("highly-secret"))
+
+        form.detailsButton.performClick(nil)
+        XCTAssertFalse(form.detailsView.isHidden)
+        form.sendButton.performClick(nil)
+
+        XCTAssertEqual(
+            outcome,
+            .submitted(["api_token": .text("highly-secret")])
+        )
+    }
+
     func testFormPresentsAndSubmitsRequiredFieldsInRequestOrder() throws {
         let request = InputRequest(
             id: "release-input",

@@ -35,7 +35,11 @@ public struct KeyKongCommand {
             switch adapter.collectInput(for: request) {
             case let .submitted(values):
                 let validated = try SubmissionValidator.validate(values, for: request)
-                return result(status: .completed, values: validated, exitCode: 0)
+                try DeliveryExecutor.execute(request.deliveries, values: validated)
+                let responseValues = validated.filter { fieldID, _ in
+                    request.fields.first { $0.id == fieldID }?.type != .secret
+                }
+                return result(status: .completed, values: responseValues, exitCode: 0)
             case .cancelled:
                 return result(status: .cancelled, values: [:], exitCode: 1)
             }

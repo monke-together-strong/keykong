@@ -6,6 +6,9 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
     let window: NSWindow
     let sendButton: NSButton
     let cancelButton: NSButton
+    let detailsButton: NSButton
+    let detailsView: NSStackView
+    let deliveryDetails: [String]
     private(set) var inputViews: [NSView] = []
     private(set) var errorLabels: [String: NSTextField] = [:]
 
@@ -24,6 +27,13 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         )
         self.sendButton = NSButton(title: "Send", target: nil, action: nil)
         self.cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
+        self.detailsButton = NSButton(title: "Details", target: nil, action: nil)
+        self.deliveryDetails = request.deliveries.map(Self.describe)
+        self.detailsView = NSStackView(
+            views: request.deliveries.map {
+                NSTextField(wrappingLabelWithString: Self.describe($0))
+            }
+        )
         super.init()
 
         configureWindow()
@@ -52,6 +62,17 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
                     firstInvalidView = firstInvalidView ?? textField
                 } else {
                     values[field.id] = .text(textField.stringValue)
+                }
+
+            case .secret:
+                let secretInput = view as! SecretInputView
+                if secretInput.stringValue
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty {
+                    markInvalid(field.id)
+                    firstInvalidView = firstInvalidView ?? secretInput.focusView
+                } else {
+                    values[field.id] = .text(secretInput.stringValue)
                 }
 
             case .select:
@@ -110,6 +131,18 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         cancelButton.bezelStyle = .rounded
         cancelButton.keyEquivalent = "\u{1b}"
         cancelButton.identifier = NSUserInterfaceItemIdentifier("cancel")
+
+        detailsButton.target = self
+        detailsButton.action = #selector(toggleDetails)
+        detailsButton.setButtonType(.pushOnPushOff)
+        detailsButton.bezelStyle = .disclosure
+        detailsButton.identifier = NSUserInterfaceItemIdentifier("details")
+        detailsButton.isHidden = request.deliveries.isEmpty
+
+        detailsView.orientation = .vertical
+        detailsView.alignment = .leading
+        detailsView.spacing = 6
+        detailsView.isHidden = true
 
         let root = NSView()
         let heading = NSTextField(labelWithString: request.title)
@@ -172,7 +205,9 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         buttons.alignment = .centerY
         buttons.spacing = 8
 
-        let content = NSStackView(views: [heading, scrollView, buttons])
+        let content = NSStackView(
+            views: [heading, scrollView, detailsButton, detailsView, buttons]
+        )
         content.orientation = .vertical
         content.alignment = .leading
         content.spacing = 18
@@ -187,10 +222,14 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
             heading.widthAnchor.constraint(equalTo: content.widthAnchor),
             scrollView.widthAnchor.constraint(equalTo: content.widthAnchor),
             scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 300),
+            detailsView.widthAnchor.constraint(equalTo: content.widthAnchor),
             buttons.trailingAnchor.constraint(equalTo: content.trailingAnchor)
         ])
 
-        configureTabOrder(focusableViews + [cancelButton, sendButton])
+        let detailControls = request.deliveries.isEmpty ? [] : [detailsButton]
+        configureTabOrder(
+            focusableViews + detailControls + [cancelButton, sendButton]
+        )
         window.contentView = root
     }
 
@@ -201,6 +240,9 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
             textField.placeholderString = field.label
             textField.heightAnchor.constraint(equalToConstant: 28).isActive = true
             return textField
+
+        case .secret:
+            return SecretInputView(label: field.label)
 
         case .select:
             let popUp = NSPopUpButton()
@@ -234,6 +276,9 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
     }
 
     private func focusableControls(in view: NSView) -> [NSView] {
+        if let secret = view as? SecretInputView {
+            return [secret.secureTextField, secret.revealButton]
+        }
         if let stack = view as? NSStackView {
             return stack.arrangedSubviews
         }
@@ -254,9 +299,100 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         errorLabels[fieldID]?.isHidden = false
     }
 
+    @objc private func toggleDetails() {
+        detailsView.isHidden = detailsButton.state != .on
+    }
+
     private func finish(with outcome: InputOutcome) {
         guard !didComplete else { return }
         didComplete = true
         onComplete(outcome)
+    }
+
+    private static func describe(_ delivery: Delivery) -> String {
+        switch delivery.operation {
+        case .append:
+            return "\(delivery.path) — append"
+        case .insertLine:
+            return "\(delivery.path) — insert before line \(delivery.line ?? 0)"
+        }
+    }
+}
+
+@MainActor
+final class SecretInputView: NSView {
+    let secureTextField = NSSecureTextField()
+    let revealedTextField = NSTextField()
+    let revealButton = NSButton(
+        checkboxWithTitle: "Reveal",
+        target: nil,
+        action: nil
+    )
+
+    var stringValue: String {
+        revealButton.state == .on
+            ? revealedTextField.stringValue
+            : secureTextField.stringValue
+    }
+
+    var focusView: NSView {
+        revealButton.state == .on ? revealedTextField : secureTextField
+    }
+
+    init(label: String) {
+        super.init(frame: .zero)
+
+        secureTextField.placeholderString = label
+        revealedTextField.placeholderString = label
+        revealedTextField.isHidden = true
+        revealButton.target = self
+        revealButton.action = #selector(toggleReveal)
+        revealedTextField.nextKeyView = revealButton
+
+        let fieldContainer = NSView()
+        for field in [secureTextField, revealedTextField] {
+            field.translatesAutoresizingMaskIntoConstraints = false
+            fieldContainer.addSubview(field)
+            NSLayoutConstraint.activate([
+                field.leadingAnchor.constraint(equalTo: fieldContainer.leadingAnchor),
+                field.trailingAnchor.constraint(equalTo: fieldContainer.trailingAnchor),
+                field.topAnchor.constraint(equalTo: fieldContainer.topAnchor),
+                field.bottomAnchor.constraint(equalTo: fieldContainer.bottomAnchor)
+            ])
+        }
+
+        let content = NSStackView(views: [fieldContainer, revealButton])
+        content.orientation = .horizontal
+        content.alignment = .centerY
+        content.spacing = 8
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor),
+            content.topAnchor.constraint(equalTo: topAnchor),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor),
+            fieldContainer.heightAnchor.constraint(equalToConstant: 28)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    @objc private func toggleReveal() {
+        if revealButton.state == .on {
+            revealedTextField.stringValue = secureTextField.stringValue
+            secureTextField.isHidden = true
+            revealedTextField.isHidden = false
+            window?.makeFirstResponder(revealedTextField)
+        } else {
+            secureTextField.stringValue = revealedTextField.stringValue
+            revealedTextField.isHidden = true
+            secureTextField.isHidden = false
+            window?.makeFirstResponder(secureTextField)
+        }
     }
 }

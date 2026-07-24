@@ -7,8 +7,8 @@ key-kong request --request request.json
 producer | key-kong request --request -
 ```
 
-A response-field request has a stable request `id`, a dialog `title`, and
-required `fields` in presentation order.
+A request has a stable request `id`, a dialog `title`, required `fields` in
+presentation order, and optional `deliveries` in execution order.
 
 ```json
 {
@@ -37,15 +37,36 @@ required `fields` in presentation order.
         { "label": "API", "value": "api" },
         { "label": "Web", "value": "web" }
       ]
+    },
+    {
+      "id": "api_token",
+      "label": "API token",
+      "type": "secret"
+    }
+  ],
+  "deliveries": [
+    {
+      "id": "write-token",
+      "path": "/absolute/path/to/existing.env",
+      "operation": "insert_line",
+      "line": 2,
+      "template": "API_TOKEN={{ api_token }}"
+    },
+    {
+      "id": "write-release",
+      "path": "/absolute/path/to/existing.log",
+      "operation": "append",
+      "template": "{{ release_name }}\\n"
     }
   ]
 }
 ```
 
 Field IDs and option values are stable caller-facing identifiers. Labels are
-display-only and may change without changing the result contract. A completed
+display-only and may change without changing the result contract. Secret fields
+are masked by default in the dialog and may be temporarily revealed. A completed
 request returns strings for text and select fields and arrays for multi-select
-fields:
+fields. Secret fields are omitted:
 
 ```json
 {
@@ -57,3 +78,15 @@ fields:
   }
 }
 ```
+
+Delivery IDs are stable. Every target must be an existing readable and writable
+regular file at an absolute path. An `insert_line` delivery inserts the rendered
+template before its one-based `line`; Key Kong adds a trailing newline when the
+rendered template does not already have one. An `append` delivery writes the
+rendered template exactly at the end of the file and must not declare `line`.
+Deliveries run in request order, including deliveries that share a target.
+
+Templates perform only `{{ field_id }}` substitution. Template field references
+must exist, secret fields must be referenced by at least one delivery, and
+multi-select fields cannot be used in templates. Key Kong validates fields,
+templates, delivery IDs, paths, and insertion lines before opening the dialog.

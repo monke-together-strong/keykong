@@ -21,8 +21,8 @@ Then submit a JSON request from a file or standard input:
 producer | .build/debug/key-kong request --request -
 ```
 
-See [the request schema](docs/request-schema.md) for the supported response
-fields and result shape.
+See [the request schema](docs/request-schema.md) for supported response and
+secret fields, ordered file deliveries, and the result shape.
 
 ## Native dialog demo
 

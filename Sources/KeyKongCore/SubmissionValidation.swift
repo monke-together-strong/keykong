@@ -20,8 +20,9 @@ enum SubmissionValidator {
             }
 
             switch (field.type, value) {
-            case let (.text, .text(text))
-                where Validation.isNonEmptySingleLine(text):
+            case let (type, .text(text))
+                where (type == .text || type == .secret)
+                    && Validation.isNonEmptySingleLine(text):
                 validated[field.id] = value
 
             case let (.select, .text(selected))

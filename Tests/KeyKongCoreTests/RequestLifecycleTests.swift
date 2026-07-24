@@ -3,6 +3,222 @@ import XCTest
 @testable import KeyKongCore
 
 final class RequestLifecycleTests: XCTestCase {
+    func testTargetLinesAreValidatedInDeliveryOrder() throws {
+        let target = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try Data("first\n".utf8).write(to: target)
+        defer { try? FileManager.default.removeItem(at: target) }
+
+        let requestJSON = """
+        {
+          "id": "ordered-deliveries",
+          "title": "Add credentials",
+          "fields": [
+            { "id": "api_token", "label": "API token", "type": "secret" }
+          ],
+          "deliveries": [
+            {
+              "id": "append-token",
+              "path": "\(target.path)",
+              "operation": "append",
+              "template": "TOKEN={{ api_token }}\\n"
+            },
+            {
+              "id": "insert-token",
+              "path": "\(target.path)",
+              "operation": "insert_line",
+              "line": 3,
+              "template": "SECOND={{ api_token }}"
+            }
+          ]
+        }
+        """
+        let adapter = RecordingAdapter(
+            outcome: .submitted(["api_token": .text("highly-secret")])
+        )
+
+        let execution = KeyKongCommand(adapter: adapter).run(
+            arguments: ["request", "--request", "-"],
+            standardInput: Data(requestJSON.utf8)
+        )
+
+        XCTAssertEqual(execution.exitCode, 0)
+        XCTAssertEqual(
+            try String(contentsOf: target, encoding: .utf8),
+            "first\nTOKEN=highly-secret\nSECOND=highly-secret\n"
+        )
+    }
+
+    func testNonRegularDeliveryTargetDoesNotOpenAdapter() {
+        let requestJSON = """
+        {
+          "id": "credential-input",
+          "title": "Add credentials",
+          "fields": [
+            { "id": "api_token", "label": "API token", "type": "secret" }
+          ],
+          "deliveries": [
+            {
+              "id": "append-token",
+              "path": "/dev/null",
+              "operation": "append",
+              "template": "{{ api_token }}"
+            }
+          ]
+        }
+        """
+        let adapter = RecordingAdapter(
+            outcome: .submitted(["api_token": .text("highly-secret")])
+        )
+
+        let execution = KeyKongCommand(adapter: adapter).run(
+            arguments: ["request", "--request", "-"],
+            standardInput: Data(requestJSON.utf8)
+        )
+
+        XCTAssertEqual(execution.exitCode, 1)
+        XCTAssertEqual(adapter.requests, [])
+    }
+
+    func testSecretsAreDeliveredInRequestOrderWithoutReturningToCaller() throws {
+        let target = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try Data("first\nlast\n".utf8).write(to: target)
+        defer { try? FileManager.default.removeItem(at: target) }
+
+        let requestJSON = """
+        {
+          "id": "credential-input",
+          "title": "Add credentials",
+          "fields": [
+            { "id": "account", "label": "Account", "type": "text" },
+            { "id": "api_token", "label": "API token", "type": "secret" }
+          ],
+          "deliveries": [
+            {
+              "id": "insert-token",
+              "path": "\(target.path)",
+              "operation": "insert_line",
+              "line": 2,
+              "template": "TOKEN={{ api_token }}"
+            },
+            {
+              "id": "append-account",
+              "path": "\(target.path)",
+              "operation": "append",
+              "template": "ACCOUNT={{ account }}\\n"
+            }
+          ]
+        }
+        """
+        let adapter = RecordingAdapter(
+            outcome: .submitted([
+                "account": .text("production"),
+                "api_token": .text("highly-secret")
+            ])
+        )
+
+        let execution = KeyKongCommand(adapter: adapter).run(
+            arguments: ["request", "--request", "-"],
+            standardInput: Data(requestJSON.utf8)
+        )
+
+        XCTAssertEqual(execution.exitCode, 0)
+        XCTAssertEqual(execution.standardError, Data())
+        XCTAssertEqual(
+            String(decoding: execution.standardOutput, as: UTF8.self),
+            #"{"status":"completed","values":{"account":"production"}}"# + "\n"
+        )
+        XCTAssertEqual(
+            try String(contentsOf: target, encoding: .utf8),
+            "first\nTOKEN=highly-secret\nlast\nACCOUNT=production\n"
+        )
+        XCTAssertFalse(
+            String(decoding: execution.standardOutput, as: UTF8.self)
+                .contains("highly-secret")
+        )
+    }
+
+    func testInvalidDeliveryRequestDoesNotOpenAdapterOrModifyTargets() throws {
+        let target = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try Data("only line\n".utf8).write(to: target)
+        defer { try? FileManager.default.removeItem(at: target) }
+
+        let requestJSON = """
+        {
+          "id": "credential-input",
+          "title": "Add credentials",
+          "fields": [
+            { "id": "api_token", "label": "API token", "type": "secret" }
+          ],
+          "deliveries": [
+            {
+              "id": "insert-token",
+              "path": "\(target.path)",
+              "operation": "insert_line",
+              "line": 3,
+              "template": "TOKEN={{ api_token }}"
+            }
+          ]
+        }
+        """
+        let adapter = RecordingAdapter(
+            outcome: .submitted(["api_token": .text("highly-secret")])
+        )
+
+        let execution = KeyKongCommand(adapter: adapter).run(
+            arguments: ["request", "--request", "-"],
+            standardInput: Data(requestJSON.utf8)
+        )
+
+        XCTAssertEqual(execution.exitCode, 1)
+        XCTAssertEqual(adapter.requests, [])
+        XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "only line\n")
+        XCTAssertFalse(
+            String(decoding: execution.standardError, as: UTF8.self)
+                .contains("highly-secret")
+        )
+    }
+
+    func testSecretDeliveryFailureDoesNotLeakSubmittedValue() throws {
+        let target = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try Data().write(to: target)
+        defer { try? FileManager.default.removeItem(at: target) }
+
+        let requestJSON = """
+        {
+          "id": "credential-input",
+          "title": "Add credentials",
+          "fields": [
+            { "id": "api_token", "label": "API token", "type": "secret" }
+          ],
+          "deliveries": [
+            {
+              "id": "append-token",
+              "path": "\(target.path)",
+              "operation": "append",
+              "template": "{{ api_token }}"
+            }
+          ]
+        }
+        """
+        let adapter = RemovingAdapter(
+            target: target,
+            outcome: .submitted(["api_token": .text("highly-secret")])
+        )
+
+        let execution = KeyKongCommand(adapter: adapter).run(
+            arguments: ["request", "--request", "-"],
+            standardInput: Data(requestJSON.utf8)
+        )
+        let combinedOutput = execution.standardOutput + execution.standardError
+
+        XCTAssertEqual(execution.exitCode, 1)
+        XCTAssertFalse(String(decoding: combinedOutput, as: UTF8.self).contains("highly-secret"))
+    }
+
     func testCallerCanCompleteAllResponseFieldTypesThroughCLI() throws {
         let requestJSON = """
         {
@@ -146,6 +362,21 @@ private final class RecordingAdapter: InputAdapter {
 
     func collectInput(for request: InputRequest) -> InputOutcome {
         requests.append(request)
+        return outcome
+    }
+}
+
+private final class RemovingAdapter: InputAdapter {
+    private let target: URL
+    private let outcome: InputOutcome
+
+    init(target: URL, outcome: InputOutcome) {
+        self.target = target
+        self.outcome = outcome
+    }
+
+    func collectInput(for request: InputRequest) -> InputOutcome {
+        try? FileManager.default.removeItem(at: target)
         return outcome
     }
 }
