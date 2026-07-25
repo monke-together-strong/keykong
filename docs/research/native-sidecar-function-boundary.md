@@ -117,13 +117,19 @@ key-kong/
 ├── bin/
 │   └── key-kong
 └── libexec/
-    └── key-kong-prompt
+    └── KeyKongPrompt.app/
+        └── Contents/
+            ├── Info.plist
+            └── MacOS/
+                └── key-kong-prompt
 ```
 
-Compile Bun into the public CLI executable and Swift into the private helper.
-The CLI resolves the helper from its own installation and never searches
-`PATH`. Sign both release binaries. An application bundle, launcher, menu-bar
-process, and daemon are unnecessary for this one-shot CLI model.
+Compile Bun into the public CLI executable and Swift into the private app-bundle
+helper. The CLI resolves the nested executable from its own installation and
+never searches `PATH`. The bundle gives the one-shot helper a stable Launch
+Services identity and regular application activation behavior; it does not make
+the helper a launcher, menu-bar process, or daemon. Sign the nested helper, app
+container, and public CLI for release.
 
 A future Windows build can replace the Swift executable with a Windows-native
 executable that implements the same JSON input/output behavior. That is a new

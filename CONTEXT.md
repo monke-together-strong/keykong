@@ -21,7 +21,9 @@ The trusted component that owns submitted values from collection through deliver
 _Avoid_: Core, coordinator
 
 **Prompt Adapter**:
-A presentation component that collects a request's fields and returns the submitted values to the broker. It does not know about or deliver to sinks.
+A presentation component that collects a request's fields and returns submitted
+values to the broker. It may receive delivery metadata for display, but never
+resolves or writes to sinks.
 _Avoid_: Input adapter, provider, broker, native adapter
 
 **Delivery Specification**:

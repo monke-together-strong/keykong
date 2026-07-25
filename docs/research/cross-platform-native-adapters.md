@@ -25,11 +25,12 @@ function-shaped boundary**:
    transport, without requiring that transport to be designed now.
 
 For Key Kong, the Broker should run in Bun. It may hold submitted values
-transiently in memory, but it must not expose them to the invoking caller,
-stdout, logs, command arguments, environment variables, or persistent storage.
-The Swift, Windows, and web implementations should own presentation—not sink
-delivery. Centralizing delivery avoids duplicating security-sensitive sink logic
-across every platform.
+transiently in memory. Secret values must not appear in caller-facing results,
+stdout, logs, command arguments, or environment variables; they may be
+persisted only by a validated delivery operation. Non-secret values may be
+returned in the result. The Swift, Windows, and web implementations should own
+presentation—not sink delivery. Centralizing delivery avoids duplicating
+security-sensitive sink logic across every platform.
 
 This shape is more conventional and maintainable than either calling native UI
 frameworks directly through FFI or turning every native helper into a complete

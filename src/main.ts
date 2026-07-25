@@ -1,9 +1,11 @@
+import packageMetadata from "../package.json";
 import { requestCommand, type Execution } from "./command";
 import { Deadline, DeadlineExpired } from "./deadline";
 import { KeyKongError } from "./errors";
 import { requestSchema } from "./schema";
 
-const help = `Key Kong 1.0.0
+const version = packageMetadata.version;
+const help = `Key Kong ${version}
 
 Usage:
   key-kong request <file|->
@@ -51,7 +53,7 @@ if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
   process.exit(0);
 }
 if (args.length === 1 && args[0] === "--version") {
-  console.log("key-kong 1.0.0");
+  console.log(`key-kong ${version}`);
   process.exit(0);
 }
 
@@ -69,11 +71,14 @@ try {
   execution = failure(error);
 }
 const output = `${JSON.stringify(execution.result)}\n`;
+const diagnostic = execution.result.status === "expired"
+  ? "request deadline expired"
+  : execution.result.error?.message;
 try {
   await processDeadline.run(Bun.write(Bun.stdout, output));
-  if (execution.result.error) {
+  if (diagnostic) {
     await processDeadline.run(
-      Bun.write(Bun.stderr, `${execution.result.error.message}\n`),
+      Bun.write(Bun.stderr, `${diagnostic}\n`),
     );
   }
 } catch (error) {

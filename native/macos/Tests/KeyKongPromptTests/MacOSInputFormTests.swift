@@ -40,10 +40,28 @@ final class MacOSInputFormTests: XCTestCase {
             )
 
         XCTAssertFalse(shouldCreateWindow)
-        XCTAssertFalse(form.window.isMiniaturized)
-        XCTAssertTrue(form.window.isVisible)
+        XCTAssertTrue(wait {
+            !form.window.isMiniaturized && form.window.isVisible
+        })
         XCTAssertIdentical(applicationDelegate.window, form.window)
         form.window.orderOut(nil)
+    }
+
+    private func wait(
+        timeout: TimeInterval = 1,
+        until condition: () -> Bool
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if condition() {
+                return true
+            }
+            RunLoop.current.run(
+                mode: .default,
+                before: Date().addingTimeInterval(0.01)
+            )
+        } while Date() < deadline
+        return condition()
     }
 
     func testCancellationClearsEnteredValuesBeforeCompleting() throws {

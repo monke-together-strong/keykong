@@ -132,16 +132,20 @@ const uiSmoke = Bun.spawnSync(
 if (uiSmoke.exitCode !== 0) {
   throw new Error("packaged Prompt Adapter UI smoke test failed");
 }
-await Bun.sleep(1_000);
-const newReports = [...helperCrashReports()]
-  .filter((name) => !reportsBefore.has(name));
+const crashReportDeadline = Date.now() + 5_000;
+let newReports: string[] = [];
+do {
+  await Bun.sleep(250);
+  newReports = [...helperCrashReports()]
+    .filter((name) => !reportsBefore.has(name));
+} while (newReports.length === 0 && Date.now() < crashReportDeadline);
 if (newReports.length > 0) {
   throw new Error(
     `packaged Prompt Adapter crashed: ${newReports.join(", ")}`,
   );
 }
 const remainingHelper = Bun.spawnSync(
-  ["/usr/bin/pgrep", "-f", helper],
+  ["/usr/bin/pgrep", "-x", "key-kong-prompt"],
   { stdout: "pipe", stderr: "pipe" },
 );
 if (remainingHelper.exitCode === 0) {

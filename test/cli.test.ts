@@ -228,6 +228,7 @@ describe("built CLI response request", () => {
     expect(performance.now() - started).toBeLessThan(1_000);
     expect(result.code).toBe(1);
     expect(result.stdout).toBe('{"status":"expired","values":{}}\n');
+    expect(result.stderr).toBe("request deadline expired\n");
     const helperPID = Number(await readFile(pidMarker, "utf8"));
     expect(() => process.kill(helperPID, 0)).toThrow();
   });

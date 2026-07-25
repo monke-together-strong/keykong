@@ -85,6 +85,10 @@ export async function prompt(
       await subprocess.exited;
       throw error;
     }
+    if (subprocess.exitCode === null) {
+      subprocess.kill(9);
+      await subprocess.exited;
+    }
     throw new KeyKongError(
       "PROMPT_FAILED",
       "native prompt returned an invalid response",

@@ -6,6 +6,9 @@ bun run build
 bun run build:helper
 
 identity=${KEY_KONG_SIGNING_IDENTITY:--}
+if [ "$identity" = "-" ]; then
+  echo "warning: KEY_KONG_SIGNING_IDENTITY unset; using an ad-hoc signature" >&2
+fi
 app=dist/libexec/KeyKongPrompt.app
 helper=$app/Contents/MacOS/key-kong-prompt
 
@@ -14,7 +17,7 @@ sign() {
   if [ "$identity" = "-" ]; then
     codesign --force --sign - "$target"
   else
-    codesign --force --timestamp --sign "$identity" "$target"
+    codesign --force --timestamp --options runtime --sign "$identity" "$target"
   fi
 }
 

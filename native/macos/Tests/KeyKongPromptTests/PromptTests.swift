@@ -1,3 +1,4 @@
+import ApplicationServices
 import CoreGraphics
 import Darwin
 import Foundation
@@ -9,8 +10,11 @@ final class PromptTests: XCTestCase {
     func testParentProcessMonitorUsesAQueueSafeExitHandler() throws {
         let parent = Process()
         parent.executableURL = URL(fileURLWithPath: "/bin/sleep")
-        parent.arguments = ["0.1"]
+        parent.arguments = ["30"]
         try parent.run()
+        defer {
+            stop(parent)
+        }
         let callback = DispatchSemaphore(value: 0)
         let monitor = try XCTUnwrap(
             ParentProcessMonitor(
@@ -20,6 +24,7 @@ final class PromptTests: XCTestCase {
                 }
             )
         )
+        parent.terminate()
 
         XCTAssertEqual(
             callback.wait(timeout: .now() + 2),
@@ -30,6 +35,14 @@ final class PromptTests: XCTestCase {
     }
 
     func testRealHelperReadsOneRequestAndWritesOneResponse() throws {
+        try XCTSkipUnless(
+            CGSessionCopyCurrentDictionary() != nil,
+            "a window-server session is required"
+        )
+        try XCTSkipUnless(
+            AXIsProcessTrusted(),
+            "Accessibility permission is required to post cancellation keystrokes"
+        )
         let productsDirectory = Bundle(for: Self.self).bundleURL
             .deletingLastPathComponent()
         let helper = productsDirectory.appendingPathComponent("key-kong-prompt")

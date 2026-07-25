@@ -102,7 +102,7 @@ process.standardError = errors
 do {
     try process.run()
 } catch {
-    try fail("packaged Prompt Adapter could not be launched")
+    try fail("packaged Prompt Adapter could not be launched: \(error)")
 }
 defer {
     if process.isRunning {
