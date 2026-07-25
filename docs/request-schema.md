@@ -1,17 +1,29 @@
 # Request schema
 
-Key Kong accepts a JSON request from a file or standard input:
+Key Kong accepts one JSON request from a file or explicit standard input:
 
 ```sh
-key-kong request --request request.json
-producer | key-kong request --request -
+key-kong request request.json
+producer | key-kong request -
 ```
 
-A request has a stable request `id`, a dialog `title`, required `fields` in
-presentation order, and optional `deliveries` in execution order.
+A request declares `schemaVersion: 1`, has a stable request `id`, a dialog
+`title`, required `fields` in presentation order, and optional `deliveries`.
+Run `key-kong schema` for the machine-readable JSON Schema, `key-kong --help`
+for usage, and `key-kong --version` for the installed version.
+
+Fields may be `text`, `secret`, `select`, or `multi_select`. Deliveries append
+rendered templates or insert them before an existing line in an absolute,
+existing readable and writable regular file. Every secret field must be
+referenced by at least one delivery.
+
+The serialized request is limited to 1 MiB. A request may contain at most 256
+fields and 256 deliveries, and each select field may contain at most 256
+options.
 
 ```json
 {
+  "schemaVersion": 1,
   "id": "release-input",
   "title": "Prepare release",
   "fields": [
@@ -46,27 +58,19 @@ presentation order, and optional `deliveries` in execution order.
   ],
   "deliveries": [
     {
-      "id": "write-token",
+      "id": "environment_file",
       "path": "/absolute/path/to/existing.env",
-      "operation": "insert_line",
-      "line": 2,
-      "template": "API_TOKEN={{ api_token }}"
-    },
-    {
-      "id": "write-release",
-      "path": "/absolute/path/to/existing.log",
       "operation": "append",
-      "template": "{{ release_name }}\\n"
+      "template": "TOKEN={{ api_token }}\n"
     }
   ]
 }
 ```
 
 Field IDs and option values are stable caller-facing identifiers. Labels are
-display-only and may change without changing the result contract. Secret fields
-are masked by default in the dialog and may be temporarily revealed. A completed
-request returns strings for text and select fields and arrays for multi-select
-fields. Secret fields are omitted:
+display-only and may change without changing the result contract. A completed
+request returns strings for non-secret text and select fields and arrays for
+multi-select fields. Secret fields are delivered but always omitted:
 
 ```json
 {
@@ -79,45 +83,28 @@ fields. Secret fields are omitted:
 }
 ```
 
-## Outcomes
+The `request` command writes exactly one newline-terminated JSON result to
+standard output. Every result has a `status` and `values` object:
 
-Every invocation writes exactly one JSON result to standard output. Only
-`completed` exits with code zero; `partial`, `failed`, `cancelled`, and
-`expired` exit nonzero. Human-readable diagnostics, when present, are written
-only to standard error.
+- `completed`: prompting and every delivery succeeded.
+- `partial`: at least one delivery succeeded and at least one failed;
+  `failedDeliveries` contains only the failed delivery IDs.
+- `failed`: the request did not complete because of usage, validation, prompt,
+  delivery, or internal failure. This includes the case where every delivery
+  failed.
+- `cancelled`: the user cancelled the prompt.
+- `expired`: the whole-request deadline elapsed.
 
-A request is `partial` when at least one delivery succeeds and at least one
-fails. Completed deliveries remain applied, non-secret submitted values are
-returned, and `failedDeliveries` contains only the failed delivery IDs:
+Failures use a structured `error` with one of these stable categories:
 
-```json
-{
-  "status": "partial",
-  "values": {
-    "release_name": "2026.07"
-  },
-  "failedDeliveries": ["write-token"]
-}
-```
+- `CLI_USAGE`: the command shape is invalid.
+- `INVALID_REQUEST`: the request cannot be read, decoded, or validated.
+- `PROMPT_FAILED`: the native helper could not start or returned an invalid
+  response or submission.
+- `DELIVERY_FAILED`: one or more deliveries failed.
+- `INTERNAL_FAILURE`: an unexpected Broker failure occurred.
 
-When all deliveries fail, the status is `failed` and `failedDeliveries` is
-omitted. Validation and worker failures also return `failed`. Cancellation and
-the ten-minute whole-request timeout return `cancelled` and `expired`,
-respectively, with empty `values`. The timeout starts before Key Kong reads the
-request and also bounds the dialog and delivery worker.
-
-Delivery IDs are stable. Every target must be an existing readable and writable
-regular file at an absolute path. An `insert_line` delivery inserts the rendered
-template before its one-based `line`; Key Kong adds a trailing newline when the
-rendered template does not already have one. An `append` delivery writes the
-rendered template exactly at the end of the file and must not declare `line`.
-Deliveries run in request order, including deliveries that share a target.
-Delivery writes run in a child process, which inherits the CLI caller's
-operating-system sandbox and permissions.
-
-Templates perform only `{{ field_id }}` substitution. Template field references
-must exist, and secret fields must be referenced by at least one delivery.
-Text and single-select fields render as their submitted value. Multi-select
-fields render as a compact JSON array of option values, preserving request
-order, such as `["api","web"]`. Key Kong validates fields, templates, delivery
-IDs, paths, and insertion lines before opening the dialog.
+Exit code `0` is reserved for `completed`. Other valid request outcomes,
+including `partial`, `failed`, `cancelled`, and `expired`, exit `1`. CLI misuse
+and invalid requests exit `2`. The JSON status and error code are the canonical
+machine-readable outcome; human diagnostics go to standard error.
