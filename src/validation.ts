@@ -1,6 +1,7 @@
 import { isAbsolute } from "node:path";
 import { DeadlineExpired, type Deadline } from "./deadline";
 import { KeyKongError } from "./errors";
+import { setEnvironmentAssignment } from "./environment";
 import { requestLimits } from "./limits";
 import { parseTemplate } from "./template";
 import { openTarget, type TargetIdentity } from "./target";
@@ -14,7 +15,8 @@ import type {
 const idPattern = /^[\p{L}\p{N}][\p{L}\p{N}_-]*$/u;
 const newlinePattern = /[\r\n\v\f\u0085\u2028\u2029]/u;
 const fieldTypes = new Set(["text", "secret", "select", "multi_select"]);
-const deliveryOperations = new Set(["append", "insert_line"]);
+const deliveryOperations = new Set(["append", "insert_line", "set_env"]);
+const environmentKeyPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function invalid(message: string): never {
   throw new KeyKongError("INVALID_REQUEST", message, 2);
@@ -128,12 +130,6 @@ function validateDelivery(
 } {
   deadline.assertActive();
   const delivery = requireObject(value, "delivery");
-  exactKeys(
-    delivery,
-    ["id", "path", "operation", "line", "template"],
-    ["id", "path", "operation", "template"],
-    "delivery",
-  );
   requireID(delivery.id, "delivery ID");
   if (typeof delivery.path !== "string" || !isAbsolute(delivery.path)) {
     invalid(`delivery '${delivery.id}' path must be absolute`);
@@ -144,6 +140,45 @@ function validateDelivery(
   ) {
     invalid(`delivery '${delivery.id}' operation is invalid`);
   }
+  if (delivery.operation === "set_env") {
+    exactKeys(
+      delivery,
+      ["id", "path", "operation", "key", "field"],
+      ["id", "path", "operation", "key", "field"],
+      "delivery",
+    );
+    if (
+      typeof delivery.key !== "string" ||
+      !environmentKeyPattern.test(delivery.key)
+    ) {
+      invalid(`set_env delivery '${delivery.id}' key is invalid`);
+    }
+    requireID(delivery.field, `set_env delivery '${delivery.id}' field`);
+    const field = fields.get(delivery.field);
+    if (!field) {
+      invalid(
+        `set_env delivery '${delivery.id}' references unknown field '${delivery.field}'`,
+      );
+    }
+    if (field.type === "multi_select") {
+      invalid(
+        `set_env delivery '${delivery.id}' field must be single-valued`,
+      );
+    }
+    return {
+      delivery: delivery as unknown as Delivery,
+      references: [delivery.field],
+      literal: "",
+      trailingLiteral: "",
+    };
+  }
+
+  exactKeys(
+    delivery,
+    ["id", "path", "operation", "line", "template"],
+    ["id", "path", "operation", "template"],
+    "delivery",
+  );
   if (typeof delivery.template !== "string") {
     invalid(`delivery '${delivery.id}' template must be a string`);
   }
@@ -183,24 +218,35 @@ function validateDelivery(
 async function inspectTarget(
   delivery: Delivery,
   deadline: Deadline,
-): Promise<{ identity: TargetIdentity; lines: number }> {
+  captureContent: boolean,
+): Promise<{ identity: TargetIdentity; lines: number; content?: Buffer }> {
   try {
     const { handle, identity } = await deadline.run(openTarget(delivery.path));
     try {
       let lines = 1;
       const buffer = Buffer.allocUnsafe(64 * 1024);
+      const chunks: Buffer[] = [];
       let position = 0;
       while (true) {
         const { bytesRead } = await deadline.run(
           handle.read(buffer, 0, buffer.length, position),
         );
         if (bytesRead === 0) break;
+        if (captureContent) {
+          chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
+        }
         position += bytesRead;
         for (let index = 0; index < bytesRead; index++) {
           if (buffer[index] === 10) lines++;
         }
       }
-      return { identity, lines };
+      return {
+        identity,
+        lines,
+        ...(captureContent
+          ? { content: Buffer.concat(chunks, position) }
+          : {}),
+      };
     } finally {
       await handle.close();
     }
@@ -232,7 +278,14 @@ function simulateDelivery(
           !trailingLiteral.endsWith("\n")
       ? 1
       : 0
-    );
+  );
+}
+
+function countNewlines(content: Buffer): number {
+  return content.reduce(
+    (count, byte) => count + Number(byte === 10),
+    0,
+  );
 }
 
 export async function validateRequest(
@@ -282,6 +335,19 @@ export async function validateRequest(
   ) {
     invalid("delivery IDs must be unique");
   }
+  const environmentAssignments = new Map<string, Set<string>>();
+  for (const delivery of deliveries) {
+    if (delivery.operation !== "set_env") continue;
+    const assignedKeys = environmentAssignments.get(delivery.path) ??
+      new Set<string>();
+    if (assignedKeys.has(delivery.key)) {
+      invalid(
+        `set_env deliveries for '${delivery.path}' key '${delivery.key}' must be unique`,
+      );
+    }
+    assignedKeys.add(delivery.key);
+    environmentAssignments.set(delivery.path, assignedKeys);
+  }
 
   const referencedFields = new Set(
     validatedDeliveries.flatMap(({ references }) => references),
@@ -290,29 +356,61 @@ export async function validateRequest(
     deadline.assertActive();
     if (field.type === "secret" && !referencedFields.has(field.id)) {
       invalid(
-        `secret field '${field.id}' must be referenced by a delivery's template`,
+        `secret field '${field.id}' must be referenced by a delivery`,
       );
     }
   }
 
   const targets = new Map<string, TargetIdentity>();
+  const environmentTargetPaths = new Set(
+    deliveries.flatMap((delivery) =>
+      delivery.operation === "set_env" ? [delivery.path] : []
+    ),
+  );
   const inspectedTargets = new Map<
     string,
-    { identity: TargetIdentity; lines: number }
+    { identity: TargetIdentity; lines: number; content?: Buffer }
   >();
   for (const [index, delivery] of deliveries.entries()) {
     deadline.assertActive();
     const target = inspectedTargets.get(delivery.path) ??
-      await inspectTarget(delivery, deadline);
+      await inspectTarget(
+        delivery,
+        deadline,
+        environmentTargetPaths.has(delivery.path),
+      );
     targets.set(delivery.id, target.identity);
-    inspectedTargets.set(delivery.path, {
-      identity: target.identity,
-      lines: simulateDelivery(
+    let nextLines: number;
+    let nextContent: Buffer | undefined;
+    if (delivery.operation === "set_env") {
+      try {
+        const content = target.content!;
+        const beforeNewlines = countNewlines(content);
+        nextContent = setEnvironmentAssignment(
+          content,
+          delivery.key,
+          "key-kong-validation",
+        );
+        const afterNewlines = countNewlines(nextContent);
+        nextLines = target.lines + afterNewlines - beforeNewlines;
+      } catch {
+        invalid(
+          `set_env delivery '${delivery.id}' target is not a supported dotenv file`,
+        );
+      }
+    } else {
+      nextLines = simulateDelivery(
         delivery,
         validatedDeliveries[index]!.literal,
         validatedDeliveries[index]!.trailingLiteral,
         target.lines,
-      ),
+      );
+      nextContent = target.content;
+    }
+    inspectedTargets.set(delivery.path, {
+      identity: target.identity,
+      lines: nextLines,
+      content: nextContent,
     });
   }
 

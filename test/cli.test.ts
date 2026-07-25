@@ -102,6 +102,43 @@ function withDeliveries(
   return JSON.stringify(value);
 }
 
+function setEnvRequest(path: string, key = "API_TOKEN", field = "api_token") {
+  return withDeliveries(path, [
+    {
+      id: "environment_assignment",
+      path,
+      operation: "set_env",
+      key,
+      field,
+    },
+  ]);
+}
+
+const nodeParseEnvScript = `
+const { readFileSync } = require("node:fs");
+const { parseEnv } = require("node:util");
+
+const content = readFileSync(0, "utf8");
+process.stdout.write(JSON.stringify(parseEnv(content)));
+`;
+
+function parseWithNode(content: string): Record<string, string> {
+  const process = Bun.spawnSync(
+    ["node", "-e", nodeParseEnvScript],
+    {
+      stdin: new TextEncoder().encode(content),
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  if (process.exitCode !== 0) {
+    throw new Error(
+      `Node parseEnv failed: ${process.stderr.toString().trim()}`,
+    );
+  }
+  return JSON.parse(process.stdout.toString());
+}
+
 function run(
   args: string[],
   options: {
@@ -111,6 +148,7 @@ function run(
     pidMarker?: string;
     deadlineMS?: number;
     internalFailure?: boolean;
+    secret?: string;
   } = {},
 ) {
   const process = Bun.spawnSync([cli, ...args], {
@@ -133,6 +171,9 @@ function run(
       ...(options.internalFailure
         ? { KEY_KONG_TEST_INTERNAL_FAILURE: "1" }
         : {}),
+      ...(options.secret === undefined
+        ? {}
+        : { KEY_KONG_FAKE_SECRET: options.secret }),
     },
   });
   return {
@@ -162,10 +203,35 @@ describe("built CLI response request", () => {
       "select",
       "multi_select",
     ]);
-    expect(schema.$defs.delivery.required).toEqual([
+    expect(schema.$defs.delivery.oneOf).toEqual([
+      { $ref: "#/$defs/appendDelivery" },
+      { $ref: "#/$defs/insertLineDelivery" },
+      { $ref: "#/$defs/setEnvDelivery" },
+    ]);
+    expect(schema.$defs.setEnvDelivery.required).toEqual([
       "id",
       "path",
       "operation",
+      "key",
+      "field",
+    ]);
+    expect(schema.$defs.setEnvDelivery.properties.operation.const).toBe(
+      "set_env",
+    );
+    expect(schema.$defs.setEnvDelivery.properties.key.pattern).toBe(
+      "^[A-Za-z_][A-Za-z0-9_]*$",
+    );
+    expect(schema.$defs.appendDelivery.required).toEqual([
+      "id",
+      "path",
+      "operation",
+      "template",
+    ]);
+    expect(schema.$defs.insertLineDelivery.required).toEqual([
+      "id",
+      "path",
+      "operation",
+      "line",
       "template",
     ]);
     expect(schema.properties.fields.maxItems).toBe(256);
@@ -318,6 +384,396 @@ describe("built CLI response request", () => {
     expect(await readFile(target, "utf8")).toBe(
       'prod us-west-2 ["audit","alerts"] highly-secret\n',
     );
+  });
+
+  test("set_env appends a missing key without exposing its secret field", async () => {
+    const target = join(directory, "set-env-empty.env");
+    await writeFile(target, "");
+
+    const result = run(["request", "-"], { stdin: setEnvRequest(target) });
+
+    expect(result.code).toBe(0);
+    expect(result.stdout + result.stderr).not.toContain("highly-secret");
+    const content = await readFile(target, "utf8");
+    expect(content).toBe('API_TOKEN="highly-secret"\n');
+    expect(parseWithNode(content).API_TOKEN).toBe("highly-secret");
+  });
+
+  test("set_env preserves assignment prefixes and the target line style", async () => {
+    const cases = [
+      {
+        name: "final-lf",
+        before: "OTHER=one\n",
+        after: 'OTHER=one\nAPI_TOKEN="highly-secret"\n',
+      },
+      {
+        name: "missing-final-newline",
+        before: "OTHER=one",
+        after: 'OTHER=one\nAPI_TOKEN="highly-secret"\n',
+      },
+      {
+        name: "crlf",
+        before: "OTHER=one\r\n",
+        after: 'OTHER=one\r\nAPI_TOKEN="highly-secret"\r\n',
+      },
+      {
+        name: "unquoted",
+        before: "API_TOKEN=old\n",
+        after: 'API_TOKEN="highly-secret"\n',
+      },
+      {
+        name: "double-quoted",
+        before: 'API_TOKEN="old value"\n',
+        after: 'API_TOKEN="highly-secret"\n',
+      },
+      {
+        name: "formatted-export",
+        before: "  export API_TOKEN  = 'old' # stale\r\n",
+        after: '  export API_TOKEN  ="highly-secret"\r\n',
+      },
+      {
+        name: "comments-and-case",
+        before: "# API_TOKEN=old\napi_token=other\n",
+        after:
+          '# API_TOKEN=old\napi_token=other\nAPI_TOKEN="highly-secret"\n',
+      },
+    ];
+
+    for (const testCase of cases) {
+      const target = join(directory, `custom-${testCase.name}.settings`);
+      await writeFile(target, testCase.before);
+
+      const result = run(["request", "-"], { stdin: setEnvRequest(target) });
+
+      expect(result.code).toBe(0);
+      expect(await readFile(target, "utf8")).toBe(testCase.after);
+    }
+  });
+
+  test("set_env chooses the first lossless Node dotenv representation", async () => {
+    const cases = [
+      {
+        name: "double",
+        value: "spaces $dollars \\\\slashes # hashes",
+        assignment: 'API_TOKEN="spaces $dollars \\\\slashes # hashes"\n',
+      },
+      {
+        name: "node-backslash",
+        value: String.raw`literal\rsequence`,
+        assignment: String.raw`API_TOKEN="literal\rsequence"` + "\n",
+      },
+      {
+        name: "node-backslash-n",
+        value: String.raw`literal\nsequence`,
+        assignment: String.raw`API_TOKEN='literal\nsequence'` + "\n",
+      },
+      {
+        name: "unmatched-leading-quote",
+        value: '"abc\'#hash',
+        assignment: 'API_TOKEN="abc\'#hash\n',
+      },
+      {
+        name: "single",
+        value: 'contains "double" quotes',
+        assignment: 'API_TOKEN=\'contains "double" quotes\'\n',
+      },
+      {
+        name: "unquoted",
+        value: 'both"quotes\'stay',
+        assignment: 'API_TOKEN=both"quotes\'stay\n',
+      },
+    ];
+
+    for (const testCase of cases) {
+      const target = join(directory, `serialized-${testCase.name}.env`);
+      await writeFile(target, "");
+
+      const result = run(["request", "-"], {
+        stdin: setEnvRequest(target),
+        secret: testCase.value,
+      });
+
+      expect(result.code).toBe(0);
+      const content = await readFile(target, "utf8");
+      expect(content).toBe(testCase.assignment);
+      expect(parseWithNode(content).API_TOKEN).toBe(testCase.value);
+    }
+  });
+
+  test("set_env rejects unsupported target content before prompting", async () => {
+    const cases: Array<{ name: string; content: string | Buffer }> = [
+      {
+        name: "duplicate-key",
+        content: "API_TOKEN=one\nexport API_TOKEN=two\n",
+      },
+      {
+        name: "invalid-utf8",
+        content: Buffer.from([0x41, 0x50, 0x49, 0x3d, 0xff, 0x0a]),
+      },
+      {
+        name: "multiline-quoted-assignment",
+        content: 'OTHER="first\nsecond"\n',
+      },
+      {
+        name: "multiline-broad-key",
+        content: 'BAD-KEY="first\nAPI_TOKEN=shadow\nsecond"\n',
+      },
+      {
+        name: "multiline-leading-equals",
+        content: '==  export A="first\nAPI_TOKEN=shadow\nsecond"\n',
+      },
+      {
+        name: "mixed-line-endings",
+        content: "ONE=1\r\nTWO=2\n",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const target = join(directory, `unsupported-${testCase.name}.env`);
+      const marker = join(directory, `unsupported-${testCase.name}.launched`);
+      await writeFile(target, testCase.content);
+      const before = await readFile(target);
+
+      const result = run(["request", "-"], {
+        stdin: setEnvRequest(target),
+        marker,
+      });
+
+      expect(result.code).toBe(2);
+      expect(JSON.parse(result.stdout).error.code).toBe("INVALID_REQUEST");
+      expect(await Bun.file(marker).exists()).toBeFalse();
+      expect(await readFile(target)).toEqual(before);
+    }
+  });
+
+  test("set_env fails unchanged when no lossless representation exists", async () => {
+    const target = join(directory, "unrepresentable.env");
+    await writeFile(target, "API_TOKEN=old\n");
+    const value = ' leading "double" and \'single\' # trailing ';
+
+    const result = run(["request", "-"], {
+      stdin: setEnvRequest(target),
+      secret: value,
+    });
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout).error.code).toBe("DELIVERY_FAILED");
+    expect(result.stdout + result.stderr).not.toContain(value);
+    expect(await readFile(target, "utf8")).toBe("API_TOKEN=old\n");
+  });
+
+  test("set_env policy is rejected before launching the Prompt Adapter", async () => {
+    const target = join(directory, "set-env-validated.env");
+    const link = join(directory, "set-env-validated-link.env");
+    const directoryTarget = join(directory, "set-env-directory");
+    const inaccessibleTarget = join(directory, "set-env-inaccessible.env");
+    await writeFile(target, "");
+    await writeFile(inaccessibleTarget, "");
+    await chmod(inaccessibleTarget, 0o400);
+    await symlink(target, link);
+    await mkdir(directoryTarget);
+    const cases = [
+      {
+        name: "invalid-key",
+        input: setEnvRequest(target, "NOT-VALID"),
+      },
+      {
+        name: "unknown-field",
+        input: setEnvRequest(target, "TOKEN", "missing"),
+      },
+      {
+        name: "multi-select-field",
+        input: setEnvRequest(target, "FEATURES", "features"),
+      },
+      {
+        name: "template-property",
+        input: withDeliveries(target, [{
+          id: "forbidden-template",
+          path: target,
+          operation: "set_env",
+          key: "TOKEN",
+          field: "api_token",
+          template: "{{ api_token }}",
+        }]),
+      },
+      {
+        name: "dialect-property",
+        input: withDeliveries(target, [{
+          id: "forbidden-dialect",
+          path: target,
+          operation: "set_env",
+          key: "TOKEN",
+          field: "api_token",
+          dialect: "node",
+        }]),
+      },
+      {
+        name: "line-property",
+        input: withDeliveries(target, [{
+          id: "forbidden-line",
+          path: target,
+          operation: "set_env",
+          key: "TOKEN",
+          field: "api_token",
+          line: 1,
+        }]),
+      },
+      {
+        name: "repeated-path-key",
+        input: withDeliveries(target, [
+          {
+            id: "first",
+            path: target,
+            operation: "set_env",
+            key: "TOKEN",
+            field: "api_token",
+          },
+          {
+            id: "second",
+            path: target,
+            operation: "set_env",
+            key: "TOKEN",
+            field: "api_token",
+          },
+        ]),
+      },
+      {
+        name: "missing-target",
+        input: setEnvRequest(join(directory, "does-not-exist.env")),
+      },
+      {
+        name: "relative-target",
+        input: setEnvRequest("relative.env"),
+      },
+      {
+        name: "symlink-target",
+        input: setEnvRequest(link),
+      },
+      {
+        name: "non-regular-target",
+        input: setEnvRequest(directoryTarget),
+      },
+      {
+        name: "inaccessible-target",
+        input: setEnvRequest(inaccessibleTarget),
+      },
+    ];
+
+    try {
+      for (const testCase of cases) {
+        const marker = join(directory, `set-env-${testCase.name}.launched`);
+        const result = run(["request", "-"], {
+          stdin: testCase.input,
+          marker,
+        });
+
+        expect(result.code).toBe(2);
+        expect(JSON.parse(result.stdout).error.code).toBe("INVALID_REQUEST");
+        expect(await Bun.file(marker).exists()).toBeFalse();
+      }
+    } finally {
+      await chmod(inaccessibleTarget, 0o600);
+    }
+  });
+
+  test("set_env accepts text and single-select source fields", async () => {
+    const cases = [
+      { field: "environment", key: "ENVIRONMENT", value: "prod" },
+      { field: "region", key: "REGION", value: "us-west-2" },
+    ];
+
+    for (const testCase of cases) {
+      const target = join(directory, `source-${testCase.field}.env`);
+      await writeFile(target, "");
+      const input = JSON.parse(request());
+      input.deliveries = [{
+        id: `set_${testCase.field}`,
+        path: target,
+        operation: "set_env",
+        key: testCase.key,
+        field: testCase.field,
+      }];
+
+      const result = run(["request", "-"], {
+        stdin: JSON.stringify(input),
+      });
+
+      expect(result.code).toBe(0);
+      expect(await readFile(target, "utf8")).toBe(
+        `${testCase.key}="${testCase.value}"\n`,
+      );
+    }
+  });
+
+  test("different set_env keys stay ordered with existing operations", async () => {
+    const target = join(directory, "set-env-ordered.env");
+    await writeFile(target, "");
+    const input = withDeliveries(target, [
+      {
+        id: "environment",
+        path: target,
+        operation: "set_env",
+        key: "ENVIRONMENT",
+        field: "environment",
+      },
+      {
+        id: "comment",
+        path: target,
+        operation: "insert_line",
+        line: 2,
+        template: "# {{ region }}",
+      },
+      {
+        id: "token",
+        path: target,
+        operation: "set_env",
+        key: "API_TOKEN",
+        field: "api_token",
+      },
+    ]);
+
+    const result = run(["request", "-"], { stdin: input });
+
+    expect(result.code).toBe(0);
+    expect(await readFile(target, "utf8")).toBe(
+      'ENVIRONMENT="prod"\n# us-west-2\nAPI_TOKEN="highly-secret"\n',
+    );
+  });
+
+  test("a later failed set_env retains an earlier Environment Assignment", async () => {
+    const first = join(directory, "set-env-partial-first.env");
+    const second = join(directory, "set-env-partial-second.env");
+    await writeFile(first, "");
+    await writeFile(second, "");
+    const input = withDeliveries(first, [
+      {
+        id: "first",
+        path: first,
+        operation: "set_env",
+        key: "API_TOKEN",
+        field: "api_token",
+      },
+      {
+        id: "second",
+        path: second,
+        operation: "set_env",
+        key: "API_TOKEN",
+        field: "api_token",
+      },
+    ]);
+
+    const result = run(["request", "-"], {
+      stdin: input,
+      mode: "replace_last",
+    });
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout).failedDeliveries).toEqual(["second"]);
+    expect(result.stdout + result.stderr).not.toContain("highly-secret");
+    expect(await readFile(first, "utf8")).toBe(
+      'API_TOKEN="highly-secret"\n',
+    );
+    expect(await readFile(second, "utf8")).toBe("");
   });
 
   test("ordered append and insert deliveries affect the same target", async () => {
@@ -633,6 +1089,29 @@ describe("built CLI response request", () => {
     expect(Number(await readFile(pidMarker, "utf8"))).toBe(child.pid);
     await Bun.sleep(250);
     expect(await readFile(target, "utf8")).toBe("");
+  });
+
+  test("deadline stops set_env before a blocked write", async () => {
+    const target = join(directory, "blocked-set-env.env");
+    await writeFile(target, "API_TOKEN=old\n");
+    const child = Bun.spawn([cli, "request", "-"], {
+      stdin: new TextEncoder().encode(setEnvRequest(target)),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...Bun.env,
+        KEY_KONG_PROMPT_EXECUTABLE: fakePrompt,
+        KEY_KONG_TEST_DEADLINE_MS: "100",
+        KEY_KONG_TEST_BLOCK_WRITE_MS: "200",
+      },
+    });
+
+    expect(await child.exited).toBe(1);
+    expect(await new Response(child.stdout).text()).toBe(
+      '{"status":"expired","values":{}}\n',
+    );
+    await Bun.sleep(250);
+    expect(await readFile(target, "utf8")).toBe("API_TOKEN=old\n");
   });
 
   test("blocked caller output cannot extend the process deadline", async () => {

@@ -8,13 +8,22 @@ const pidMarker = process.env.KEY_KONG_FAKE_PID_MARKER;
 if (pidMarker) await Bun.write(pidMarker, String(process.pid));
 
 const request = JSON.parse(await Bun.stdin.text());
+const secret = process.env.KEY_KONG_FAKE_SECRET ?? "highly-secret";
+const projectedDeliveryKeys: Record<string, string[]> = {
+  append: ["path", "operation"],
+  insert_line: ["path", "operation", "line"],
+  set_env: ["path", "operation", "key", "field"],
+};
 if (
   request.deliveries.some(
-    (delivery: Record<string, unknown>) =>
-      "template" in delivery ||
-      "id" in delivery ||
-      !("path" in delivery) ||
-      !("operation" in delivery),
+    (delivery: Record<string, unknown>) => {
+      const allowed = typeof delivery.operation === "string"
+        ? projectedDeliveryKeys[delivery.operation] ?? []
+        : [];
+      return Object.keys(delivery).some((key) => !allowed.includes(key)) ||
+        !("path" in delivery) ||
+        !("operation" in delivery);
+    },
   )
 ) {
   process.exit(9);
@@ -49,8 +58,7 @@ const deliveryFields = [
 if (
   !(
     (request.title === "Deploy" &&
-      JSON.stringify(request.fields) === JSON.stringify(expectedFields) &&
-      JSON.stringify(request.deliveries) === "[]") ||
+      JSON.stringify(request.fields) === JSON.stringify(expectedFields)) ||
     (request.title === "Deploy secret" &&
       JSON.stringify(request.fields) === JSON.stringify(deliveryFields))
   )
@@ -139,7 +147,7 @@ switch (process.env.KEY_KONG_FAKE_MODE) {
           region: "us-west-2",
           features: ["alerts", "audit"],
           ...(request.title === "Deploy secret"
-            ? { api_token: "highly-secret" }
+            ? { api_token: secret }
             : {}),
         },
       }),

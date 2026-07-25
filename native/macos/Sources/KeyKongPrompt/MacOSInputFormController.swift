@@ -19,7 +19,12 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         request: PromptRequest,
         onComplete: @escaping (PromptOutcome) -> Void
     ) {
-        let deliveryDetails = request.deliveries.map(Self.describe)
+        let fieldLabels = Dictionary(
+            uniqueKeysWithValues: request.fields.map { ($0.id, $0.label) }
+        )
+        let deliveryDetails = request.deliveries.map {
+            Self.describe($0, fieldLabels: fieldLabels)
+        }
         self.request = request
         self.onComplete = onComplete
         self.window = NSWindow(
@@ -330,12 +335,19 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         }
     }
 
-    private static func describe(_ delivery: PromptDelivery) -> String {
+    private static func describe(
+        _ delivery: PromptDelivery,
+        fieldLabels: [String: String]
+    ) -> String {
         switch delivery.operation {
         case .append:
             return "\(delivery.path) — append"
         case .insertLine:
             return "\(delivery.path) — insert before line \(delivery.line ?? 0)"
+        case .setEnv:
+            let field = delivery.field ?? ""
+            let label = fieldLabels[field] ?? field
+            return "\(delivery.path) — set \(delivery.key ?? "") from \(label)"
         }
     }
 }

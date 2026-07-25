@@ -1,4 +1,5 @@
 import { insertBeforeLine } from "./content";
+import { setEnvironmentAssignment } from "./environment";
 import { renderTemplate } from "./template";
 import { openTarget, type TargetIdentity } from "./target";
 import type {
@@ -9,6 +10,29 @@ import type {
 
 declare const KEY_KONG_TESTING: boolean;
 declare var self: Worker;
+
+function prepareContent(
+  delivery: Delivery,
+  content: Buffer,
+  values: Record<string, ResponseValue>,
+): Buffer | undefined {
+  switch (delivery.operation) {
+    case "append":
+      return Buffer.concat([content, renderTemplate(delivery.template, values)]);
+    case "insert_line":
+      return insertBeforeLine(
+        content,
+        delivery.line,
+        renderTemplate(delivery.template, values),
+      );
+    case "set_env":
+      return setEnvironmentAssignment(
+        content,
+        delivery.key,
+        values[delivery.field] as string,
+      );
+  }
+}
 
 async function execute(
   delivery: Delivery,
@@ -22,10 +46,7 @@ async function execute(
     }
 
     const content = await handle.readFile();
-    const rendered = renderTemplate(delivery.template, values);
-    const result = delivery.operation === "append"
-      ? Buffer.concat([content, rendered])
-      : insertBeforeLine(content, delivery.line!, rendered);
+    const result = prepareContent(delivery, content, values);
     if (!result) throw new Error("line outside target");
 
     let offset = 0;

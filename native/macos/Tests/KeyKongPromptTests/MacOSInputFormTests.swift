@@ -112,6 +112,12 @@ final class MacOSInputFormTests: XCTestCase {
                     path: "/tmp/settings",
                     operation: .insertLine,
                     line: 2
+                ),
+                PromptDelivery(
+                    path: "/tmp/existing.env",
+                    operation: .setEnv,
+                    key: "API_TOKEN",
+                    field: "api_token"
                 )
             ]
         )
@@ -139,7 +145,8 @@ final class MacOSInputFormTests: XCTestCase {
             form.deliveryDetails,
             [
                 "/tmp/existing.env — append",
-                "/tmp/settings — insert before line 2"
+                "/tmp/settings — insert before line 2",
+                "/tmp/existing.env — set API_TOKEN from API token"
             ]
         )
         XCTAssertFalse(form.deliveryDetails.joined().contains("TOKEN="))

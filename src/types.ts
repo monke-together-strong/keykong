@@ -13,13 +13,33 @@ export interface Field {
   options?: Option[];
 }
 
-export interface Delivery {
+export interface AppendDelivery {
   id: string;
   path: string;
-  operation: "append" | "insert_line";
-  line?: number;
+  operation: "append";
   template: string;
 }
+
+export interface InsertLineDelivery {
+  id: string;
+  path: string;
+  operation: "insert_line";
+  line: number;
+  template: string;
+}
+
+export interface SetEnvDelivery {
+  id: string;
+  path: string;
+  operation: "set_env";
+  key: string;
+  field: string;
+}
+
+export type Delivery =
+  | AppendDelivery
+  | InsertLineDelivery
+  | SetEnvDelivery;
 
 export interface Request {
   schemaVersion: 1;
@@ -32,7 +52,16 @@ export interface Request {
 export interface PromptRequest {
   title: string;
   fields: Field[];
-  deliveries: Array<Pick<Delivery, "path" | "operation" | "line">>;
+  deliveries: Array<
+    | { path: string; operation: "append" }
+    | { path: string; operation: "insert_line"; line: number }
+    | {
+      path: string;
+      operation: "set_env";
+      key: string;
+      field: string;
+    }
+  >;
 }
 
 export interface DeliveryWorkerRequest {
