@@ -3,10 +3,11 @@ interface PhysicalLine {
   ending: "" | "\n" | "\r\n";
 }
 
-const prefixPattern = String.raw`[\t ]*(?:export[\t ]+)?`;
-const targetPrefixPattern = String.raw`[=\t ]*(?:export[\t ]+)?`;
+const prefixPattern = String.raw`[\t ]*(?:export [\t ]*)?`;
+const targetPrefixPattern = String.raw`[=\t ]*(?:export [\t ]*)?`;
 const assignmentPattern = new RegExp(
   `^${targetPrefixPattern}[^#=\\t ][^=]*=(.*)$`,
+  "s",
 );
 
 function physicalLines(text: string): PhysicalLine[] {
@@ -59,7 +60,7 @@ function serialize(value: string): string {
     return `"${value}"`;
   }
   if (!value.includes("'")) return `'${value}'`;
-  if (value.trim() === value) {
+  if (!/^[\t ]|[\t ]$/.test(value)) {
     const openingQuote = ['"', "'", "`"].includes(value[0]!)
       ? value[0]
       : undefined;
@@ -88,6 +89,7 @@ export function setEnvironmentAssignment(
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const active = new RegExp(
     `^(${prefixPattern}${escapedKey}[\\t ]*=)(.*)$`,
+    "s",
   );
   const matches = lines.flatMap(({ body }, index) => {
     if (body.trimStart().startsWith("#")) return [];

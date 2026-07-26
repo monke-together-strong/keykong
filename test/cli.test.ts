@@ -432,6 +432,17 @@ describe("built CLI response request", () => {
         after: '  export API_TOKEN  ="highly-secret"\r\n',
       },
       {
+        name: "export-space-tab",
+        before: "export \tAPI_TOKEN=old\n",
+        after: 'export \tAPI_TOKEN="highly-secret"\n',
+      },
+      {
+        name: "export-tab-is-key",
+        before: "export\tAPI_TOKEN=old\n",
+        after:
+          'export\tAPI_TOKEN=old\nAPI_TOKEN="highly-secret"\n',
+      },
+      {
         name: "comments-and-case",
         before: "# API_TOKEN=old\napi_token=other\n",
         after:
@@ -482,6 +493,11 @@ describe("built CLI response request", () => {
         value: 'both"quotes\'stay',
         assignment: 'API_TOKEN=both"quotes\'stay\n',
       },
+      {
+        name: "unquoted-non-ascii-whitespace",
+        value: ' both"quotes\'stay ',
+        assignment: 'API_TOKEN= both"quotes\'stay \n',
+      },
     ];
 
     for (const testCase of cases) {
@@ -521,6 +537,14 @@ describe("built CLI response request", () => {
       {
         name: "multiline-leading-equals",
         content: '==  export A="first\nAPI_TOKEN=shadow\nsecond"\n',
+      },
+      {
+        name: "multiline-unicode-line-separator",
+        content: 'OTHER="first\u2028\nAPI_TOKEN=shadow\nsecond"\n',
+      },
+      {
+        name: "multiline-unicode-paragraph-separator",
+        content: 'OTHER="first\u2029\nAPI_TOKEN=shadow\nsecond"\n',
       },
       {
         name: "mixed-line-endings",
