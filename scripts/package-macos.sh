@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-rm -rf dist/bin dist/libexec
+rm -rf dist
 bun run build
 bun run build:helper
 

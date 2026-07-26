@@ -119,7 +119,8 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
                 firstInvalidView.enclosingScrollView?
                     .documentView?
                     .layoutSubtreeIfNeeded()
-                firstInvalidView.scrollToVisible(firstInvalidView.bounds)
+                let target = firstInvalidView.superview ?? firstInvalidView
+                target.scrollToVisible(target.bounds)
             }
             return
         }
@@ -199,7 +200,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         emblem.wantsLayer = true
         emblem.layer?.cornerRadius = 44
         emblem.layer?.masksToBounds = true
-        emblem.setAccessibilityLabel("Key Kong emblem")
+        emblem.setAccessibilityElement(false)
         emblem.widthAnchor.constraint(equalToConstant: 88).isActive = true
         emblem.heightAnchor.constraint(equalToConstant: 88).isActive = true
 
@@ -207,6 +208,12 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         heading.identifier = NSUserInterfaceItemIdentifier("heading")
         heading.font = .systemFont(ofSize: 26, weight: .semibold)
         heading.textColor = .white
+        heading.maximumNumberOfLines = 1
+        heading.lineBreakMode = .byTruncatingTail
+        heading.setContentCompressionResistancePriority(
+            .defaultLow,
+            for: .horizontal
+        )
 
         let reassurance = NSTextField(
             wrappingLabelWithString:
@@ -227,7 +234,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         let textBlock = NSLayoutGuide()
         header.addLayoutGuide(textBlock)
         NSLayoutConstraint.activate([
-            header.heightAnchor.constraint(equalToConstant: 88),
+            header.heightAnchor.constraint(greaterThanOrEqualToConstant: 88),
             emblem.leadingAnchor.constraint(equalTo: header.leadingAnchor),
             emblem.topAnchor.constraint(equalTo: header.topAnchor),
             textBlock.leadingAnchor.constraint(
@@ -264,7 +271,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
             error.textColor = NSColor.systemRed.blended(
                 withFraction: 0.25,
                 of: .white
-            )
+            ) ?? .systemRed
             error.font = .systemFont(ofSize: 11)
             error.isHidden = true
             errorLabels[field.id] = error
@@ -430,18 +437,14 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
     }
 
     @objc private func toggleDetails() {
-        detailsView.isHidden = detailsButton.state != .on
+        let isExpanded = detailsButton.state == .on
+        detailsView.isHidden = !isExpanded
         detailsButton.image = NSImage(
-            systemSymbolName:
-                detailsButton.state == .on
-                    ? "chevron.down"
-                    : "chevron.right",
+            systemSymbolName: isExpanded ? "chevron.down" : "chevron.right",
             accessibilityDescription:
-                detailsButton.state == .on
-                    ? "Hide details"
-                    : "Show details"
+                isExpanded ? "Hide details" : "Show details"
         )
-        if detailsButton.state == .on {
+        if isExpanded {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 detailsView.superview?.layoutSubtreeIfNeeded()
@@ -514,6 +517,11 @@ final class SecretInputView: NSView {
 
         KeyKongTheme.style(secureTextField)
         KeyKongTheme.style(revealedTextField)
+        let revealGutter: CGFloat = 42
+        (secureTextField.cell as? KeyKongSecureTextFieldCell)?
+            .trailingTextInset = revealGutter
+        (revealedTextField.cell as? KeyKongTextFieldCell)?
+            .trailingTextInset = revealGutter
         secureTextField.setAccessibilityLabel(label)
         revealedTextField.setAccessibilityLabel(label)
         revealedTextField.isHidden = true
@@ -522,11 +530,7 @@ final class SecretInputView: NSView {
         revealButton.setButtonType(.toggle)
         revealButton.bezelStyle = .inline
         revealButton.isBordered = false
-        revealButton.image = KeyKongTheme.symbol(
-            "lock.shield.fill",
-            description: "Reveal secret",
-            glyphLimit: 16
-        )
+        updateRevealButton(isRevealed: false)
         revealButton.imagePosition = .imageOnly
         revealButton.imageScaling = .scaleNone
         revealButton.alignment = .center
@@ -580,24 +584,14 @@ final class SecretInputView: NSView {
             revealedTextField.stringValue = secureTextField.stringValue
             secureTextField.isHidden = true
             revealedTextField.isHidden = false
-            revealButton.image = KeyKongTheme.symbol(
-                "lock.open.fill",
-                description: "Hide secret"
-            )
-            revealButton.toolTip = "Hide secret"
-            revealButton.setAccessibilityLabel("Hide secret")
+            updateRevealButton(isRevealed: true)
             window?.makeFirstResponder(revealedTextField)
         } else {
             secureTextField.stringValue = revealedTextField.stringValue
+            revealedTextField.stringValue = ""
             revealedTextField.isHidden = true
             secureTextField.isHidden = false
-            revealButton.image = KeyKongTheme.symbol(
-                "lock.shield.fill",
-                description: "Reveal secret",
-                glyphLimit: 16
-            )
-            revealButton.toolTip = "Reveal secret"
-            revealButton.setAccessibilityLabel("Reveal secret")
+            updateRevealButton(isRevealed: false)
             window?.makeFirstResponder(secureTextField)
         }
     }
@@ -606,56 +600,27 @@ final class SecretInputView: NSView {
         secureTextField.stringValue = ""
         revealedTextField.stringValue = ""
         revealButton.state = .off
-        revealButton.image = KeyKongTheme.symbol(
-            "lock.shield.fill",
-            description: "Reveal secret",
-            glyphLimit: 16
-        )
-        revealButton.toolTip = "Reveal secret"
-        revealButton.setAccessibilityLabel("Reveal secret")
+        updateRevealButton(isRevealed: false)
         revealedTextField.isHidden = true
         secureTextField.isHidden = false
     }
-}
 
-@MainActor
-final class KeyKongPointerButton: NSButton {
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        KeyKongPointerCursor.install(on: self)
-    }
-}
-
-@MainActor
-enum KeyKongPointerCursor {
-    private static let marker = "KeyKongPointerCursor"
-
-    static func install(on view: NSView) {
-        guard !isInstalled(on: view) else {
-            return
-        }
-        view.addTrackingArea(
-            NSTrackingArea(
-                rect: .zero,
-                options: [.activeInKeyWindow, .cursorUpdate, .inVisibleRect],
-                owner: KeyKongPointerCursorOwner.shared,
-                userInfo: [marker: true]
+    private func updateRevealButton(isRevealed: Bool) {
+        let description = isRevealed ? "Hide secret" : "Reveal secret"
+        if isRevealed {
+            revealButton.image = KeyKongTheme.symbol(
+                "lock.open.fill",
+                description: description
             )
-        )
-    }
-
-    static func isInstalled(on view: NSView) -> Bool {
-        view.trackingAreas.contains {
-            $0.userInfo?[marker] as? Bool == true
+        } else {
+            // The shield needs a larger optical box to match the open lock.
+            revealButton.image = KeyKongTheme.symbol(
+                "lock.shield.fill",
+                description: description,
+                glyphLimit: 16
+            )
         }
-    }
-}
-
-@MainActor
-private final class KeyKongPointerCursorOwner: NSObject {
-    static let shared = KeyKongPointerCursorOwner()
-
-    @objc func cursorUpdate(with event: NSEvent) {
-        NSCursor.pointingHand.set()
+        revealButton.toolTip = description
+        revealButton.setAccessibilityLabel(description)
     }
 }

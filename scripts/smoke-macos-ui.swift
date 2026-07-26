@@ -245,9 +245,6 @@ guard wait(until: { windows(of: application).count == 1 }) else {
         $0[kCGWindowOwnerPID as String] as? pid_t
             == process.processIdentifier
     }.count ?? 0
-    if windows(of: application).isEmpty && coreGraphicsCount > 0 {
-        throw SmokeSkip()
-    }
     try fail(
         "packaged Prompt Adapter window mismatch "
             + "(AX: \(windows(of: application).count), "

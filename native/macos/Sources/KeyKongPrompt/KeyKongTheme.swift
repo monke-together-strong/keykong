@@ -58,6 +58,9 @@ enum KeyKongTheme {
             return nil
         }
         let canvasSize = NSSize(width: 18, height: 18)
+        guard glyph.size.width > 0, glyph.size.height > 0 else {
+            return nil
+        }
         let scale = min(
             glyphLimit / glyph.size.width,
             glyphLimit / glyph.size.height
@@ -145,7 +148,7 @@ enum KeyKongTheme {
 private extension NSColor {
     convenience init(hex: UInt32) {
         self.init(
-            calibratedRed: CGFloat((hex >> 16) & 0xFF) / 255,
+            srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
             green: CGFloat((hex >> 8) & 0xFF) / 255,
             blue: CGFloat(hex & 0xFF) / 255,
             alpha: 1
@@ -166,9 +169,13 @@ final class KeyKongBackgroundView: NSView {
         )?.draw(in: bounds, angle: -90)
 
         KeyKongTheme.slate.withAlphaComponent(0.8).setStroke()
+        let titlebarHeight = window.map {
+            bounds.height - convert($0.contentLayoutRect, from: nil).height
+        } ?? 38.5
+        let dividerY = bounds.maxY - titlebarHeight + 0.5
         let divider = NSBezierPath()
-        divider.move(to: NSPoint(x: 0, y: bounds.maxY - 38.5))
-        divider.line(to: NSPoint(x: bounds.maxX, y: bounds.maxY - 38.5))
+        divider.move(to: NSPoint(x: 0, y: dividerY))
+        divider.line(to: NSPoint(x: bounds.maxX, y: dividerY))
         divider.lineWidth = 1
         divider.stroke()
     }
@@ -179,27 +186,73 @@ final class KeyKongFlippedView: NSView {
 }
 
 @MainActor
+final class KeyKongPointerButton: NSButton {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        KeyKongPointerCursor.install(on: self)
+    }
+}
+
+@MainActor
+enum KeyKongPointerCursor {
+    private static let marker = "KeyKongPointerCursor"
+
+    static func install(on view: NSView) {
+        guard !isInstalled(on: view) else {
+            return
+        }
+        view.addTrackingArea(
+            NSTrackingArea(
+                rect: .zero,
+                options: [.activeInKeyWindow, .cursorUpdate, .inVisibleRect],
+                owner: KeyKongPointerCursorOwner.shared,
+                userInfo: [marker: true]
+            )
+        )
+    }
+
+    static func isInstalled(on view: NSView) -> Bool {
+        view.trackingAreas.contains {
+            $0.userInfo?[marker] as? Bool == true
+        }
+    }
+}
+
+@MainActor
+private final class KeyKongPointerCursorOwner: NSObject {
+    static let shared = KeyKongPointerCursorOwner()
+
+    @objc func cursorUpdate(with event: NSEvent) {
+        NSCursor.pointingHand.set()
+    }
+}
+
+@MainActor
 private func verticallyCenteredTextRect(
     for cell: NSCell,
     bounds: NSRect,
-    drawingRect: NSRect
+    drawingRect: NSRect,
+    trailingInset: CGFloat
 ) -> NSRect {
     guard let font = cell.font else { return drawingRect }
     let height = ceil(font.ascender - font.descender + font.leading)
     return NSRect(
         x: drawingRect.minX,
         y: floor(bounds.midY - height / 2),
-        width: drawingRect.width,
+        width: max(0, drawingRect.width - trailingInset),
         height: height
     )
 }
 
 final class KeyKongTextFieldCell: NSTextFieldCell {
+    var trailingTextInset: CGFloat = 0
+
     override func drawingRect(forBounds rect: NSRect) -> NSRect {
         verticallyCenteredTextRect(
             for: self,
             bounds: rect,
-            drawingRect: super.drawingRect(forBounds: rect)
+            drawingRect: super.drawingRect(forBounds: rect),
+            trailingInset: trailingTextInset
         )
     }
 
@@ -239,11 +292,14 @@ final class KeyKongTextFieldCell: NSTextFieldCell {
 }
 
 final class KeyKongSecureTextFieldCell: NSSecureTextFieldCell {
+    var trailingTextInset: CGFloat = 0
+
     override func drawingRect(forBounds rect: NSRect) -> NSRect {
         verticallyCenteredTextRect(
             for: self,
             bounds: rect,
-            drawingRect: super.drawingRect(forBounds: rect)
+            drawingRect: super.drawingRect(forBounds: rect),
+            trailingInset: trailingTextInset
         )
     }
 
