@@ -165,6 +165,31 @@ final class MacOSInputFormTests: XCTestCase {
         XCTAssertEqual(secretInput.revealButton.state, .off)
     }
 
+    func testDetailsResolveCanonicallyEquivalentFieldIDsExactly() {
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Exact field identity",
+                fields: [
+                    PromptField(id: "가", label: "Precomposed", type: .text),
+                    PromptField(id: "가", label: "Decomposed", type: .text)
+                ],
+                deliveries: [
+                    PromptDelivery(
+                        path: "/tmp/existing.env",
+                        operation: .setEnv,
+                        key: "VALUE",
+                        field: "가"
+                    )
+                ]
+            )
+        ) { _ in }
+
+        XCTAssertEqual(
+            form.deliveryDetails,
+            ["/tmp/existing.env — set VALUE from Decomposed"]
+        )
+    }
+
     func testFormPresentsAndSubmitsRequiredFieldsInRequestOrder() throws {
         let request = PromptRequest(
             title: "Prepare release",

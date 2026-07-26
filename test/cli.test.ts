@@ -673,9 +673,16 @@ describe("built CLI response request", () => {
     const directoryTarget = join(directory, "set-env-directory");
     const inaccessibleTarget = join(directory, "set-env-inaccessible.env");
     const hardlinkTarget = join(directory, "set-env-hardlink.env");
+    const capturedTarget = join(directory, "set-env-captured.env");
+    const capturedAlias = join(directory, "set-env-captured-alias.env");
     await writeFile(target, "");
     await writeFile(inaccessibleTarget, "");
+    await writeFile(
+      capturedTarget,
+      "API_TOKEN=one\nAPI_TOKEN=two\n",
+    );
     await createHardLink(target, hardlinkTarget);
+    await createHardLink(capturedTarget, capturedAlias);
     await chmod(inaccessibleTarget, 0o400);
     await symlink(target, link);
     await mkdir(directoryTarget);
@@ -764,6 +771,24 @@ describe("built CLI response request", () => {
         ]),
       },
       {
+        name: "captured-content-through-identity",
+        input: withDeliveries(capturedTarget, [
+          {
+            id: "first",
+            path: capturedTarget,
+            operation: "append",
+            template: "# {{ environment }}\n",
+          },
+          {
+            id: "second",
+            path: capturedAlias,
+            operation: "set_env",
+            key: "API_TOKEN",
+            field: "api_token",
+          },
+        ]),
+      },
+      {
         name: "missing-target",
         input: setEnvRequest(join(directory, "does-not-exist.env")),
       },
@@ -797,6 +822,9 @@ describe("built CLI response request", () => {
         expect(JSON.parse(result.stdout).error.code).toBe("INVALID_REQUEST");
         expect(await Bun.file(marker).exists()).toBeFalse();
       }
+      expect(await readFile(capturedTarget, "utf8")).toBe(
+        "API_TOKEN=one\nAPI_TOKEN=two\n",
+      );
     } finally {
       await chmod(inaccessibleTarget, 0o600);
     }

@@ -386,7 +386,13 @@ export async function validateRequest(
       );
     const targetKey =
       `${inspectedTarget.identity.dev}:${inspectedTarget.identity.ino}`;
-    const target = inspectedTargetsByIdentity.get(targetKey) ?? inspectedTarget;
+    const cachedTarget = inspectedTargetsByIdentity.get(targetKey);
+    const target = cachedTarget === undefined
+      ? inspectedTarget
+      : {
+        ...cachedTarget,
+        content: cachedTarget.content ?? inspectedTarget.content,
+      };
     targets.set(delivery.id, target.identity);
     if (delivery.operation === "set_env") {
       const assignedKeys = environmentKeysByTarget.get(targetKey) ??

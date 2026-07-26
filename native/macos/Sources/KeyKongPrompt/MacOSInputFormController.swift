@@ -19,11 +19,8 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         request: PromptRequest,
         onComplete: @escaping (PromptOutcome) -> Void
     ) {
-        let fieldLabels = Dictionary(
-            uniqueKeysWithValues: request.fields.map { ($0.id, $0.label) }
-        )
         let deliveryDetails = request.deliveries.map {
-            Self.describe($0, fieldLabels: fieldLabels)
+            Self.describe($0, fields: request.fields)
         }
         self.request = request
         self.onComplete = onComplete
@@ -337,7 +334,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
 
     private static func describe(
         _ delivery: PromptDelivery,
-        fieldLabels: [String: String]
+        fields: [PromptField]
     ) -> String {
         switch delivery.operation {
         case .append:
@@ -346,7 +343,9 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
             return "\(delivery.path) — insert before line \(delivery.line ?? 0)"
         case .setEnv:
             let field = delivery.field ?? ""
-            let label = fieldLabels[field] ?? field
+            let label = fields.first {
+                $0.id.utf8.elementsEqual(field.utf8)
+            }?.label ?? field
             return "\(delivery.path) — set \(delivery.key ?? "") from \(label)"
         }
     }
