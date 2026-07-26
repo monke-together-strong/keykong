@@ -68,20 +68,102 @@ private func windows(of application: AXUIElement) -> [AXUIElement] {
     return values as? [AXUIElement] ?? []
 }
 
-private func postEscape(to processID: pid_t) {
+private func descendants(of element: AXUIElement) -> [AXUIElement] {
+    guard let children = attribute(
+        kAXChildrenAttribute as CFString,
+        of: element,
+        as: [AXUIElement].self
+    ) else {
+        return []
+    }
+    return children + children.flatMap(descendants)
+}
+
+private func postKey(
+    _ virtualKey: CGKeyCode,
+    modifiers: CGEventFlags = [],
+    to processID: pid_t
+) {
     let source = CGEventSource(stateID: .combinedSessionState)
     let keyDown = CGEvent(
         keyboardEventSource: source,
-        virtualKey: 53,
+        virtualKey: virtualKey,
         keyDown: true
     )
+    keyDown?.flags = modifiers
     let keyUp = CGEvent(
         keyboardEventSource: source,
-        virtualKey: 53,
+        virtualKey: virtualKey,
         keyDown: false
     )
+    keyUp?.flags = modifiers
     keyDown?.postToPid(processID)
     keyUp?.postToPid(processID)
+    RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+}
+
+private enum Key {
+    static let a: CGKeyCode = 0
+    static let z: CGKeyCode = 6
+    static let x: CGKeyCode = 7
+    static let c: CGKeyCode = 8
+    static let v: CGKeyCode = 9
+}
+
+private func focus(_ element: AXUIElement, named name: String) throws {
+    guard AXUIElementSetAttributeValue(
+        element,
+        kAXFocusedAttribute as CFString,
+        kCFBooleanTrue
+    ) == .success else {
+        try fail("packaged Prompt Adapter \(name) could not be focused")
+    }
+    guard wait(until: {
+        attribute(
+            kAXFocusedAttribute as CFString,
+            of: element,
+            as: Bool.self
+        ) == true
+    }) else {
+        try fail("packaged Prompt Adapter \(name) did not become focused")
+    }
+}
+
+private func value(of element: AXUIElement) -> String? {
+    attribute(
+        kAXValueAttribute as CFString,
+        of: element,
+        as: String.self
+    )
+}
+
+private func expectValue(
+    _ expected: String,
+    in element: AXUIElement,
+    failure: String
+) throws {
+    guard wait(timeout: 1, until: { value(of: element) == expected }) else {
+        try fail(
+            "\(failure) (value: \((value(of: element) ?? "").debugDescription))"
+        )
+    }
+}
+
+private func expectValueLength(
+    _ expected: Int,
+    in element: AXUIElement,
+    failure: String
+) throws {
+    guard wait(timeout: 1, until: {
+        value(of: element)?.count == expected
+    }) else {
+        try fail(failure)
+    }
+}
+
+private func setClipboard(_ value: String, on pasteboard: NSPasteboard) {
+    pasteboard.clearContents()
+    pasteboard.setString(value, forType: .string)
 }
 
 private func runSmoke() throws {
@@ -120,7 +202,8 @@ input.fileHandleForWriting.write(
         {
           "title": "Packaged UI smoke",
           "fields": [
-            {"id":"name","label":"Name","type":"text"}
+            {"id":"name","label":"Name","type":"text"},
+            {"id":"token","label":"Token","type":"secret"}
           ],
           "deliveries": []
         }
@@ -170,6 +253,157 @@ guard wait(until: { windows(of: application).count == 1 }) else {
 }
 let originalWindow = windows(of: application)[0]
 
+guard runningApplication.activate(options: [.activateAllWindows]) else {
+    try fail("packaged Prompt Adapter could not be activated")
+}
+guard wait(until: { runningApplication.isActive }) else {
+    try fail("packaged Prompt Adapter did not become active")
+}
+
+let pasteboard = NSPasteboard.general
+let originalPasteboardItems: [NSPasteboardItem] =
+    pasteboard.pasteboardItems?.map { item -> NSPasteboardItem in
+        let copy = NSPasteboardItem()
+        for type in item.types {
+            if let data = item.data(forType: type) {
+                copy.setData(data, forType: type)
+            }
+        }
+        return copy
+    } ?? []
+defer {
+    pasteboard.clearContents()
+    pasteboard.writeObjects(originalPasteboardItems as [NSPasteboardWriting])
+}
+let pastedValue = "keykong-original"
+setClipboard(pastedValue, on: pasteboard)
+
+guard let textField = descendants(of: originalWindow).first(where: {
+    attribute(kAXRoleAttribute as CFString, of: $0, as: String.self)
+        == (kAXTextFieldRole as String)
+}) else {
+    try fail("packaged Prompt Adapter has no accessible text field")
+}
+try focus(textField, named: "text field")
+postKey(Key.v, modifiers: .maskCommand, to: process.processIdentifier)
+try expectValue(
+    pastedValue,
+    in: textField,
+    failure: "Paste did not update the packaged text field"
+)
+
+let replacementValue = "keykong-replacement"
+setClipboard(replacementValue, on: pasteboard)
+postKey(Key.a, modifiers: .maskCommand, to: process.processIdentifier)
+postKey(Key.v, modifiers: .maskCommand, to: process.processIdentifier)
+try expectValue(
+    replacementValue,
+    in: textField,
+    failure: "Select All did not replace the packaged text field"
+)
+
+postKey(Key.z, modifiers: .maskCommand, to: process.processIdentifier)
+try expectValue(
+    "",
+    in: textField,
+    failure: "Undo did not revert the packaged text field"
+)
+
+postKey(
+    Key.z,
+    modifiers: [.maskCommand, .maskShift],
+    to: process.processIdentifier
+)
+try expectValue(
+    replacementValue,
+    in: textField,
+    failure: "Redo did not restore the packaged text field"
+)
+
+let clipboardGuard = "keykong-clipboard-guard"
+setClipboard(clipboardGuard, on: pasteboard)
+postKey(Key.a, modifiers: .maskCommand, to: process.processIdentifier)
+postKey(Key.c, modifiers: .maskCommand, to: process.processIdentifier)
+guard wait(timeout: 1, until: {
+    pasteboard.string(forType: .string) == replacementValue
+}) else {
+    try fail("Copy did not write the selected packaged text field")
+}
+
+postKey(Key.x, modifiers: .maskCommand, to: process.processIdentifier)
+guard wait(timeout: 1, until: {
+    value(of: textField) == ""
+        && pasteboard.string(forType: .string) == replacementValue
+}) else {
+    try fail("Cut did not remove and copy the selected packaged text field")
+}
+
+postKey(Key.z, modifiers: .maskCommand, to: process.processIdentifier)
+try expectValue(
+    replacementValue,
+    in: textField,
+    failure: "Undo did not restore the cut packaged text field"
+)
+
+guard let secureField = descendants(of: originalWindow).first(where: {
+    attribute(kAXSubroleAttribute as CFString, of: $0, as: String.self)
+        == (kAXSecureTextFieldSubrole as String)
+}) else {
+    try fail("packaged Prompt Adapter has no accessible secure field")
+}
+try focus(secureField, named: "secure field")
+
+let secureOriginal = "keykong-secret-one"
+setClipboard(secureOriginal, on: pasteboard)
+postKey(Key.v, modifiers: .maskCommand, to: process.processIdentifier)
+try expectValueLength(
+    secureOriginal.count,
+    in: secureField,
+    failure: "Paste did not update the packaged secure field"
+)
+
+let secureReplacement = "keykong-secret-replacement"
+setClipboard(secureReplacement, on: pasteboard)
+postKey(Key.a, modifiers: .maskCommand, to: process.processIdentifier)
+postKey(Key.v, modifiers: .maskCommand, to: process.processIdentifier)
+try expectValueLength(
+    secureReplacement.count,
+    in: secureField,
+    failure: "Select All did not replace the packaged secure field"
+)
+
+postKey(Key.z, modifiers: .maskCommand, to: process.processIdentifier)
+try expectValue(
+    "",
+    in: secureField,
+    failure: "Undo did not revert the packaged secure field"
+)
+postKey(
+    Key.z,
+    modifiers: [.maskCommand, .maskShift],
+    to: process.processIdentifier
+)
+try expectValueLength(
+    secureReplacement.count,
+    in: secureField,
+    failure: "Redo did not restore the packaged secure field"
+)
+
+setClipboard(clipboardGuard, on: pasteboard)
+postKey(Key.a, modifiers: .maskCommand, to: process.processIdentifier)
+postKey(Key.c, modifiers: .maskCommand, to: process.processIdentifier)
+RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+guard pasteboard.string(forType: .string) == clipboardGuard else {
+    try fail("Copy exposed the packaged secure field")
+}
+
+postKey(Key.x, modifiers: .maskCommand, to: process.processIdentifier)
+RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+guard pasteboard.string(forType: .string) == clipboardGuard,
+      value(of: secureField)?.count == secureReplacement.count else {
+    try fail("Cut exposed or removed the packaged secure field")
+}
+
 guard AXUIElementSetAttributeValue(
     originalWindow,
     kAXMinimizedAttribute as CFString,
@@ -196,6 +430,9 @@ if let finder = NSRunningApplication
 guard runningApplication.activate(options: [.activateAllWindows]) else {
     try fail("packaged Prompt Adapter could not be reactivated")
 }
+guard wait(until: { runningApplication.isActive }) else {
+    try fail("packaged Prompt Adapter did not become active after reactivation")
+}
 guard wait(until: {
     attribute(
         kAXMinimizedAttribute as CFString,
@@ -212,16 +449,40 @@ guard reactivatedWindows.count == 1,
     try fail("reactivation created a second prompt window")
 }
 
-postEscape(to: process.processIdentifier)
+guard let sendButton = descendants(of: originalWindow).first(where: {
+    attribute(kAXRoleAttribute as CFString, of: $0, as: String.self)
+        == (kAXButtonRole as String)
+        && attribute(
+            kAXTitleAttribute as CFString,
+            of: $0,
+            as: String.self
+        ) == "Send"
+}) else {
+    try fail("packaged Prompt Adapter has no accessible Send button")
+}
+guard AXUIElementPerformAction(
+    sendButton,
+    kAXPressAction as CFString
+) == .success else {
+    try fail("packaged Prompt Adapter Send button could not be pressed")
+}
 guard wait(until: { !process.isRunning }) else {
-    try fail("packaged Prompt Adapter did not exit after cancellation")
+    try fail("packaged Prompt Adapter did not exit after submission")
 }
 guard process.terminationStatus == 0 else {
     try fail("packaged Prompt Adapter exited unsuccessfully")
 }
-guard output.fileHandleForReading.readDataToEndOfFile()
-    == Data(#"{"status":"cancelled"}"#.utf8) + Data([0x0A]) else {
-    try fail("packaged Prompt Adapter returned an unexpected response")
+let response = output.fileHandleForReading.readDataToEndOfFile()
+let expectedResponse = Data(
+    """
+    {"status":"submitted","values":{"name":"keykong-replacement","token":"keykong-secret-replacement"}}
+    """.utf8
+) + Data([0x0A])
+guard response == expectedResponse else {
+    try fail(
+        "packaged Prompt Adapter returned an unexpected response: "
+            + (String(data: response, encoding: .utf8) ?? "<non-UTF-8>")
+    )
 }
 guard errors.fileHandleForReading.readDataToEndOfFile().isEmpty else {
     try fail("packaged Prompt Adapter wrote to stderr")

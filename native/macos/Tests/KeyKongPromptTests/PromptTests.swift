@@ -1,5 +1,4 @@
-import ApplicationServices
-import CoreGraphics
+import AppKit
 import Darwin
 import Foundation
 import XCTest
@@ -34,97 +33,44 @@ final class PromptTests: XCTestCase {
         monitor.cancel()
     }
 
-    func testRealHelperReadsOneRequestAndWritesOneResponse() throws {
-        try XCTSkipUnless(
-            CGSessionCopyCurrentDictionary() != nil,
-            "a window-server session is required"
-        )
-        try XCTSkipUnless(
-            AXIsProcessTrusted(),
-            "Accessibility permission is required to post cancellation keystrokes"
-        )
-        let productsDirectory = Bundle(for: Self.self).bundleURL
-            .deletingLastPathComponent()
-        let helper = productsDirectory.appendingPathComponent("key-kong-prompt")
-        let process = Process()
-        let input = Pipe()
-        let output = Pipe()
-        let errors = Pipe()
-        process.executableURL = helper
-        process.standardInput = input
-        process.standardOutput = output
-        process.standardError = errors
+    @MainActor
+    func testMainMenuExposesStandardEditingCommands() throws {
+        let menu = PromptRunner.makeMainMenu()
+        let applicationMenu = try XCTUnwrap(menu.items.first?.submenu)
+        let quitItem = try XCTUnwrap(applicationMenu.items.first)
+        XCTAssertEqual(quitItem.title, "Quit KeyKong")
+        XCTAssertEqual(quitItem.action, #selector(NSApplication.terminate(_:)))
+        XCTAssertEqual(quitItem.keyEquivalent, "q")
+        XCTAssertEqual(quitItem.keyEquivalentModifierMask, [.command])
+        XCTAssertNil(quitItem.target)
 
-        try process.run()
-        defer {
-            stop(process)
-        }
-        input.fileHandleForWriting.write(
-            Data(
-                """
-                {
-                  "title": "Contract check",
-                  "fields": [
-                    {"id":"name","label":"Name","type":"text"}
-                  ],
-                  "deliveries": []
-                }
-                """.utf8
-            )
-        )
-        try input.fileHandleForWriting.close()
-        guard waitForWindow(ownedBy: process.processIdentifier) else {
-            XCTFail("the real helper did not present its AppKit window")
-            return
-        }
-        postEscape(to: process.processIdentifier)
-        guard waitForExit(process) else {
-            XCTFail("the real helper did not exit after cancellation")
-            return
-        }
+        let editMenu = try XCTUnwrap(menu.item(withTitle: "Edit")?.submenu)
+        let items = editMenu.items.filter { !$0.isSeparatorItem }
 
-        XCTAssertEqual(process.terminationStatus, 0)
         XCTAssertEqual(
-            output.fileHandleForReading.readDataToEndOfFile(),
-            Data(#"{"status":"cancelled"}"#.utf8) + Data([0x0A])
+            items.map(\.title),
+            ["Undo", "Redo", "Cut", "Copy", "Paste", "Select All"]
         )
         XCTAssertEqual(
-            errors.fileHandleForReading.readDataToEndOfFile(),
-            Data()
+            items.compactMap(\.action).map(NSStringFromSelector),
+            ["undo:", "redo:", "cut:", "copy:", "paste:", "selectAll:"]
         )
-    }
-
-    private func waitForWindow(ownedBy processID: pid_t) -> Bool {
-        let timeout = Date().addingTimeInterval(5)
-        repeat {
-            let windows = CGWindowListCopyWindowInfo(
-                .optionAll,
-                kCGNullWindowID
-            ) as? [[String: Any]]
-            if windows?.contains(where: {
-                $0[kCGWindowOwnerPID as String] as? pid_t == processID
-            }) == true {
-                return true
-            }
-            Thread.sleep(forTimeInterval: 0.01)
-        } while Date() < timeout
-        return false
-    }
-
-    private func postEscape(to processID: pid_t) {
-        let source = CGEventSource(stateID: .combinedSessionState)
-        let keyDown = CGEvent(
-            keyboardEventSource: source,
-            virtualKey: 53,
-            keyDown: true
+        XCTAssertEqual(
+            items.map(\.keyEquivalent),
+            ["z", "z", "x", "c", "v", "a"]
         )
-        let keyUp = CGEvent(
-            keyboardEventSource: source,
-            virtualKey: 53,
-            keyDown: false
+        XCTAssertEqual(
+            items.map(\.keyEquivalentModifierMask),
+            [
+                [.command],
+                [.command, .shift],
+                [.command],
+                [.command],
+                [.command],
+                [.command]
+            ]
         )
-        keyDown?.postToPid(processID)
-        keyUp?.postToPid(processID)
+        XCTAssertTrue(items.allSatisfy { $0.target == nil })
     }
 
     private func waitForExit(

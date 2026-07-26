@@ -8,10 +8,10 @@ const version = packageMetadata.version;
 const help = `Key Kong ${version}
 
 Usage:
-  key-kong request <file|->
-  key-kong schema
-  key-kong --help
-  key-kong --version
+  keykong request <file|->
+  keykong schema
+  keykong --help
+  keykong --version
 `;
 
 declare const KEY_KONG_TESTING: boolean;
@@ -53,7 +53,7 @@ if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
   process.exit(0);
 }
 if (args.length === 1 && args[0] === "--version") {
-  console.log(`key-kong ${version}`);
+  console.log(`keykong ${version}`);
   process.exit(0);
 }
 

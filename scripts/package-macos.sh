@@ -10,7 +10,7 @@ if [ "$identity" = "-" ]; then
   echo "warning: KEY_KONG_SIGNING_IDENTITY unset; using an ad-hoc signature" >&2
 fi
 app=dist/libexec/KeyKongPrompt.app
-helper=$app/Contents/MacOS/key-kong-prompt
+helper=$app/Contents/MacOS/keykong-prompt
 
 sign() {
   target=$1
@@ -23,10 +23,10 @@ sign() {
 
 sign "$helper"
 sign "$app"
-sign dist/bin/key-kong
+sign dist/bin/keykong
 
 codesign --verify --strict --verbose=2 "$helper"
 codesign --verify --deep --strict --verbose=2 "$app"
-codesign --verify --strict --verbose=2 dist/bin/key-kong
+codesign --verify --strict --verbose=2 dist/bin/keykong
 
 bun scripts/smoke-package.ts

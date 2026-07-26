@@ -329,8 +329,8 @@ export async function validateRequest(
     fields.map((field) => [
       field.id,
       field.type === "multi_select"
-        ? ["key-kong-validation"]
-        : "key-kong-validation",
+        ? ["keykong-validation"]
+        : "keykong-validation",
     ]),
   ) as Record<string, ResponseValue>;
   if (fieldsByID.size !== fields.length) invalid("field IDs must be unique");
@@ -428,7 +428,7 @@ export async function validateRequest(
         nextContent = setEnvironmentAssignment(
           content,
           delivery.key,
-          "key-kong-validation",
+          "keykong-validation",
         );
         const afterNewlines = countNewlines(nextContent);
         nextLines = target.lines + afterNewlines - beforeNewlines;

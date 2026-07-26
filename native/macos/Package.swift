@@ -3,10 +3,10 @@
 import PackageDescription
 
 let package = Package(
-    name: "key-kong-prompt",
+    name: "keykong-prompt",
     platforms: [.macOS(.v13)],
     products: [
-        .executable(name: "key-kong-prompt", targets: ["KeyKongPromptCLI"])
+        .executable(name: "keykong-prompt", targets: ["KeyKongPromptCLI"])
     ],
     targets: [
         .target(name: "KeyKongPrompt"),

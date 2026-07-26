@@ -10,7 +10,7 @@ the request lifecycle remain in Bun.
 
 The repository contains one Bun package for the Broker and one Swift package
 for the macOS Prompt Adapter. The self-contained distribution places the sole
-public executable at `bin/key-kong` and packages the private signed helper as
+public executable at `bin/keykong` and packages the private signed helper as
 `libexec/KeyKongPrompt.app`, with the stable bundle identifier
 `dev.keykong.prompt`, user-facing display name `KeyKong`, and a version derived
 from the root package version; the Broker launches its nested executable
