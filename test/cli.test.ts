@@ -427,6 +427,11 @@ describe("built CLI response request", () => {
         after: 'API_TOKEN="highly-secret"\n',
       },
       {
+        name: "whitespace-before-comment",
+        before: "API_TOKEN= \n# stop\nOTHER=one\n",
+        after: 'API_TOKEN="highly-secret"\n# stop\nOTHER=one\n',
+      },
+      {
         name: "double-quoted",
         before: 'API_TOKEN="old value"\n',
         after: 'API_TOKEN="highly-secret"\n',
@@ -554,6 +559,10 @@ describe("built CLI response request", () => {
       {
         name: "cross-line-whitespace-assignment",
         content: "OTHER= \nAPI_TOKEN=shadow\n",
+      },
+      {
+        name: "target-cross-line-whitespace-assignment",
+        content: "API_TOKEN= \nOTHER=one\n",
       },
       {
         name: "bom-prefixed-multiline-assignment",
@@ -829,6 +838,40 @@ describe("built CLI response request", () => {
       'API_TOKEN="highly-secret"\n',
     );
     expect(await readFile(second, "utf8")).toBe("");
+  });
+
+  test("a later set_env cannot close an earlier unquoted fallback", async () => {
+    const target = join(directory, "set-env-unmatched-quote.env");
+    await writeFile(target, "");
+    const input = withDeliveries(target, [
+      {
+        id: "first",
+        path: target,
+        operation: "set_env",
+        key: "FIRST",
+        field: "api_token",
+      },
+      {
+        id: "second",
+        path: target,
+        operation: "set_env",
+        key: "SECOND",
+        field: "environment",
+      },
+    ]);
+    const secret = '"abc\'#hash';
+
+    const result = run(["request", "-"], {
+      stdin: input,
+      secret,
+    });
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout).failedDeliveries).toEqual(["second"]);
+    expect(result.stdout + result.stderr).not.toContain(secret);
+    const content = await readFile(target, "utf8");
+    expect(content).toBe(`FIRST=${secret}\n`);
+    expect(parseWithNode(content).FIRST).toBe(secret);
   });
 
   test("ordered append and insert deliveries affect the same target", async () => {

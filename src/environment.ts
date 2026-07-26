@@ -14,6 +14,14 @@ function trimHorizontalStart(value: string): string {
   return value.replace(/^[\t ]*/, "");
 }
 
+function consumesFollowingLine(lines: PhysicalLine[], index: number): boolean {
+  const next = lines
+    .slice(index + 1)
+    .map(({ body }) => trimHorizontalStart(body))
+    .find((body) => body !== "");
+  return next !== undefined && !next.startsWith("#");
+}
+
 function physicalLines(text: string): PhysicalLine[] {
   const lines: PhysicalLine[] = [];
   let start = 0;
@@ -49,10 +57,13 @@ function validateTarget(
     const assignment = assignmentPattern.exec(body);
     const rawRightHandSide = assignment?.[1];
     if (
-      index !== replacedIndex &&
       rawRightHandSide !== "" &&
       rawRightHandSide !== undefined &&
-      /^[\t ]+$/.test(rawRightHandSide)
+      /^[\t ]+$/.test(rawRightHandSide) &&
+      (
+        index !== replacedIndex ||
+        consumesFollowingLine(lines, index)
+      )
     ) {
       throw new Error("cross-line whitespace assignment");
     }
@@ -130,6 +141,7 @@ export function setEnvironmentAssignment(
       ending: lineEnding,
     });
   }
+  validateTarget(lines);
 
   return Buffer.from(
     lines.map(({ body, ending }) => body + ending).join(""),
