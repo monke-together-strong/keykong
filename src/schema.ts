@@ -74,37 +74,71 @@ export const requestSchema = {
       ],
     },
     delivery: {
+      oneOf: [
+        { $ref: "#/$defs/appendDelivery" },
+        { $ref: "#/$defs/insertLineDelivery" },
+        { $ref: "#/$defs/setEnvDelivery" },
+      ],
+    },
+    appendDelivery: {
       type: "object",
       additionalProperties: false,
       required: ["id", "path", "operation", "template"],
       properties: {
         id: { $ref: "#/$defs/id" },
-        path: {
-          type: "string",
-          pattern: "^/",
-          description:
-            "Absolute path to an existing readable and writable regular file.",
-        },
-        operation: { enum: ["append", "insert_line"] },
+        path: { $ref: "#/$defs/deliveryPath" },
+        operation: { const: "append" },
+        template: { $ref: "#/$defs/deliveryTemplate" },
+      },
+    },
+    insertLineDelivery: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "path", "operation", "line", "template"],
+      properties: {
+        id: { $ref: "#/$defs/id" },
+        path: { $ref: "#/$defs/deliveryPath" },
+        operation: { const: "insert_line" },
         line: { type: "integer", minimum: 1 },
-        template: {
-          type: "string",
-          pattern:
-            "\\{\\{\\s*[\\p{L}\\p{N}][\\p{L}\\p{N}_-]*\\s*\\}\\}",
+        template: { $ref: "#/$defs/deliveryTemplate" },
+      },
+    },
+    setEnvDelivery: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "path", "operation", "key", "field"],
+      properties: {
+        id: { $ref: "#/$defs/id" },
+        path: { $ref: "#/$defs/deliveryPath" },
+        operation: {
+          const: "set_env",
           description:
-            "Must contain a reference to an existing field; brace syntax and secret references are validated semantically.",
+            "Sets one Environment Assignment from one single-valued field.",
+        },
+        key: {
+          type: "string",
+          pattern: "^[A-Za-z_][A-Za-z0-9_]*$",
+          description: "The exact, case-sensitive dotenv key to set.",
+        },
+        field: {
+          $ref: "#/$defs/id",
+          description:
+            "The stable ID of a text, secret, or single-select source field.",
         },
       },
-      allOf: [
-        {
-          if: {
-            properties: { operation: { const: "insert_line" } },
-            required: ["operation"],
-          },
-          then: { required: ["line"] },
-          else: { not: { required: ["line"] } },
-        },
-      ],
+    },
+    deliveryPath: {
+      type: "string",
+      pattern: "^/",
+      description:
+        "Absolute path to an existing readable and writable regular file.",
+    },
+    deliveryTemplate: {
+      type: "string",
+      pattern:
+        "\\{\\{\\s*[\\p{L}\\p{N}][\\p{L}\\p{N}_-]*\\s*\\}\\}",
+      description:
+        "Must contain a reference to an existing field; brace syntax and secret references are validated semantically.",
     },
   },
 } as const;

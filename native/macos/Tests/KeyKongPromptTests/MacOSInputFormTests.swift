@@ -112,6 +112,12 @@ final class MacOSInputFormTests: XCTestCase {
                     path: "/tmp/settings",
                     operation: .insertLine,
                     line: 2
+                ),
+                PromptDelivery(
+                    path: "/tmp/existing.env",
+                    operation: .setEnv,
+                    key: "API_TOKEN",
+                    field: "api_token"
                 )
             ]
         )
@@ -139,7 +145,8 @@ final class MacOSInputFormTests: XCTestCase {
             form.deliveryDetails,
             [
                 "/tmp/existing.env — append",
-                "/tmp/settings — insert before line 2"
+                "/tmp/settings — insert before line 2",
+                "/tmp/existing.env — set API_TOKEN from API token"
             ]
         )
         XCTAssertFalse(form.deliveryDetails.joined().contains("TOKEN="))
@@ -156,6 +163,33 @@ final class MacOSInputFormTests: XCTestCase {
         XCTAssertEqual(secretInput.secureTextField.stringValue, "")
         XCTAssertEqual(secretInput.revealedTextField.stringValue, "")
         XCTAssertEqual(secretInput.revealButton.state, .off)
+    }
+
+    func testDetailsResolveCanonicallyEquivalentFieldIDsExactly() {
+        let precomposed = "\u{AC00}"
+        let decomposed = "\u{1100}\u{1161}"
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Exact field identity",
+                fields: [
+                    PromptField(id: precomposed, label: "Precomposed", type: .text),
+                    PromptField(id: decomposed, label: "Decomposed", type: .text)
+                ],
+                deliveries: [
+                    PromptDelivery(
+                        path: "/tmp/existing.env",
+                        operation: .setEnv,
+                        key: "VALUE",
+                        field: decomposed
+                    )
+                ]
+            )
+        ) { _ in }
+
+        XCTAssertEqual(
+            form.deliveryDetails,
+            ["/tmp/existing.env — set VALUE from Decomposed"]
+        )
     }
 
     func testFormPresentsAndSubmitsRequiredFieldsInRequestOrder() throws {

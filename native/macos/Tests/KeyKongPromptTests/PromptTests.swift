@@ -161,7 +161,9 @@ final class PromptTests: XCTestCase {
                     {"id":"token","label":"Token","type":"secret"}
                   ],
                   "deliveries": [
-                    {"path":"/tmp/config","operation":"insert_line","line":2}
+                    {"path":"/tmp/config","operation":"insert_line","line":2},
+                    {"path":"/tmp/.env","operation":"set_env",
+                     "key":"API_TOKEN","field":"token"}
                   ]
                 }
                 """.utf8
@@ -171,6 +173,9 @@ final class PromptTests: XCTestCase {
         XCTAssertEqual(request.fields.first?.options?.first?.value, "us-west-2")
         XCTAssertEqual(request.fields.last?.type, .secret)
         XCTAssertEqual(request.deliveries.first?.line, 2)
+        XCTAssertEqual(request.deliveries.last?.operation, .setEnv)
+        XCTAssertEqual(request.deliveries.last?.key, "API_TOKEN")
+        XCTAssertEqual(request.deliveries.last?.field, "token")
 
         let encoded = try JSONEncoder().encode(
             PromptOutcome.submitted(["region": .text("us-west-2")])

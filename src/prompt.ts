@@ -22,11 +22,24 @@ export async function prompt(
   const projected: PromptRequest = {
     title: request.title,
     fields: request.fields,
-    deliveries: request.deliveries.map(({ path, operation, line }) => ({
-      path,
-      operation,
-      ...(line === undefined ? {} : { line }),
-    })),
+    deliveries: request.deliveries.map((delivery) => {
+      if (delivery.operation === "insert_line") {
+        return {
+          path: delivery.path,
+          operation: delivery.operation,
+          line: delivery.line,
+        };
+      }
+      if (delivery.operation === "set_env") {
+        return {
+          path: delivery.path,
+          operation: delivery.operation,
+          key: delivery.key,
+          field: delivery.field,
+        };
+      }
+      return { path: delivery.path, operation: delivery.operation };
+    }),
   };
 
   let subprocess: ReturnType<typeof Bun.spawn>;

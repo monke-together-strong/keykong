@@ -2,6 +2,11 @@
 
 A secure, blocking input Broker for agent skills and manual workflows.
 
+It presents desktop prompts, shows resolved destinations, routes submitted
+values through Broker-validated delivery specifications, and returns only
+outcomes and non-secret response values to the caller. This keeps secrets out
+of model context, logs, and tool responses.
+
 The shipped macOS architecture is one Bun package and one Swift package. Bun
 provides the sole public `key-kong` executable; Swift provides only the private,
 one-shot AppKit Prompt Adapter packaged as an application bundle.
@@ -52,8 +57,8 @@ newline-terminated JSON result to standard output.
 
 See [the request schema](docs/request-schema.md) for the versioned contract.
 The Bun path supports required text, secret, single-select, and multi-select
-fields plus ordered append and insert-before-line deliveries to existing
-absolute-path files.
+fields plus ordered append, insert-before-line, and key-aware `set_env`
+deliveries to existing absolute-path files.
 
 ## Architecture
 
@@ -62,9 +67,9 @@ decoding, authoritative request and submission validation, prompt projection,
 template rendering, filesystem delivery, result shaping, and exit behavior.
 The Swift Prompt Adapter provides immediate required-field feedback in the UI,
 receives presentation-only JSON on standard input, and returns one submission
-or cancellation JSON object on standard output. It sees sanitized delivery
-paths, operations, and insertion lines, but never templates or delivery
-behavior.
+or cancellation JSON object on standard output. It sees sanitized Delivery
+paths and operations plus insertion lines or `set_env` key and source Field
+identity, but never templates, submitted values, or Delivery behavior.
 
 Each invocation is one Bun process and, when prompting is needed, one Swift
 helper process. While input is pending, the private app has regular macOS

@@ -56,21 +56,28 @@ public struct PromptDelivery: Codable, Equatable, Sendable {
     public let path: String
     public let operation: DeliveryOperation
     public let line: Int?
+    public let key: String?
+    public let field: String?
 
     public init(
         path: String,
         operation: DeliveryOperation,
-        line: Int? = nil
+        line: Int? = nil,
+        key: String? = nil,
+        field: String? = nil
     ) {
         self.path = path
         self.operation = operation
         self.line = line
+        self.key = key
+        self.field = field
     }
 }
 
 public enum DeliveryOperation: String, Codable, Equatable, Sendable {
     case append
     case insertLine = "insert_line"
+    case setEnv = "set_env"
 }
 
 public enum ResponseValue: Equatable, Sendable {
