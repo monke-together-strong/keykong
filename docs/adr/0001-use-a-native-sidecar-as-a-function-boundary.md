@@ -27,10 +27,8 @@ The one-shot boundary is per CLI invocation, not a system-wide singleton.
 Concurrent invocations may each own one helper process and one prompt.
 Reactivating an existing helper raises and, when needed, deminiaturizes that
 helper's existing prompt; it never creates another prompt for the same request.
-Package verification always checks the regular activation policy and uses a
-capability-aware UI smoke test for miniaturization, reactivation, same-window
-identity, and prompt non-duplication when a trusted interactive Accessibility
-session is available.
+Package verification checks the regular activation policy without launching an
+interactive prompt. Visual testing remains an explicit developer action.
 
 This architecture has no daemon, FFI, plugin registry, or runtime adapter
 discovery. The private application bundle is packaging for the one-shot Prompt

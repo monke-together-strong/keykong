@@ -739,17 +739,9 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
             .isActive = true
 
         if delivery.operation != .setEnv {
-            let explanation = NSTextField(
-                labelWithString:
-                    "Template · {{ placeholders }} are replaced when sent"
-            )
-            explanation.font = .systemFont(ofSize: 11)
-            explanation.textColor = KeyKongTheme.silver
-            card.addArrangedSubview(explanation)
-
             let templateLabel = NSTextField(
                 wrappingLabelWithString:
-                    delivery.template ?? "Template unavailable"
+                    templateForDisplay(delivery.template)
             )
             templateLabel.identifier = NSUserInterfaceItemIdentifier(
                 "delivery-\(index)-template"
@@ -794,6 +786,19 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         }
 
         return card
+    }
+
+    private static func templateForDisplay(_ template: String?) -> String {
+        guard let template else {
+            return "Template unavailable"
+        }
+        if template.hasSuffix("\r\n") {
+            return String(template.dropLast(2))
+        }
+        if template.hasSuffix("\n") {
+            return String(template.dropLast())
+        }
+        return template
     }
 }
 

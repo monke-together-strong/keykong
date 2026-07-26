@@ -705,131 +705,6 @@ final class MacOSInputFormTests: XCTestCase {
         )
     }
 
-    func testDetailsCollapseKeepsTheDetailsControlVisible() throws {
-        let form = MacOSInputFormController(
-            request: PromptRequest(
-                title: "Credentials needed",
-                fields: [
-                    PromptField(
-                        id: "github_token",
-                        label: "GitHub token",
-                        type: .secret
-                    ),
-                    PromptField(
-                        id: "deploy_token",
-                        label: "Deploy token",
-                        type: .secret
-                    ),
-                    PromptField(
-                        id: "environment",
-                        label: "Environment",
-                        type: .text
-                    ),
-                    PromptField(
-                        id: "region",
-                        label: "Region",
-                        type: .select,
-                        options: [
-                            PromptOption(label: "Oregon", value: "us-west-2")
-                        ]
-                    ),
-                    PromptField(
-                        id: "features",
-                        label: "Features",
-                        type: .multiSelect,
-                        options: [
-                            PromptOption(label: "Audit", value: "audit"),
-                            PromptOption(label: "Alerts", value: "alerts"),
-                            PromptOption(label: "Previews", value: "previews")
-                        ]
-                    )
-                ],
-                deliveries: [
-                    PromptDelivery(path: "/tmp/one", operation: .append),
-                    PromptDelivery(path: "/tmp/two", operation: .append)
-                ]
-            )
-        ) { _ in }
-        let root = try XCTUnwrap(form.window.contentView)
-        let scrollView = try XCTUnwrap(
-            descendant("form-scroll", in: root) as? NSScrollView
-        )
-        form.window.center()
-        form.window.orderFront(nil)
-        root.layoutSubtreeIfNeeded()
-        form.detailsButton.scrollToVisible(form.detailsButton.bounds)
-        let collapsedScrollOffset = scrollView.contentView.bounds.origin.y
-
-        form.detailsButton.performClick(nil)
-        XCTAssertTrue(wait {
-            root.layoutSubtreeIfNeeded()
-            return !form.detailsView.isHidden
-                && scrollView.contentView.bounds.contains(
-                    form.detailsView.convert(
-                        form.detailsView.bounds,
-                        to: scrollView.contentView
-                    )
-                )
-        })
-
-        form.detailsButton.performClick(nil)
-
-        XCTAssertTrue(wait {
-            root.layoutSubtreeIfNeeded()
-            return form.detailsView.isHidden
-                && scrollView.contentView.bounds.contains(
-                    form.detailsButton.convert(
-                        form.detailsButton.bounds,
-                        to: scrollView.contentView
-                    )
-                )
-        })
-        XCTAssertEqual(
-            scrollView.contentView.bounds.origin.y,
-            collapsedScrollOffset,
-            accuracy: 0.5
-        )
-        form.window.orderOut(nil)
-    }
-
-    func testDetailsExpansionSuppressesTheTransientScroller() throws {
-        let form = MacOSInputFormController(
-            request: PromptRequest(
-                title: "Smooth details",
-                fields: [
-                    PromptField(id: "token", label: "Token", type: .secret)
-                ],
-                deliveries: [
-                    PromptDelivery(path: "/tmp/one", operation: .append),
-                    PromptDelivery(path: "/tmp/two", operation: .append)
-                ]
-            )
-        ) { _ in }
-        let root = try XCTUnwrap(form.window.contentView)
-        let scrollView = try XCTUnwrap(
-            descendant("form-scroll", in: root) as? NSScrollView
-        )
-        form.window.orderFront(nil)
-        let scrollerStates = BoolRecorder()
-        let observation = scrollView.observe(
-            \.hasVerticalScroller,
-            options: [.new]
-        ) { _, change in
-            if let state = change.newValue {
-                scrollerStates.append(state)
-            }
-        }
-
-        form.detailsButton.performClick(nil)
-
-        XCTAssertEqual(scrollerStates.values.first, false)
-        XCTAssertTrue(wait {
-            scrollerStates.values.last == true
-        })
-        withExtendedLifetime(observation) {}
-        form.window.orderOut(nil)
-    }
-
     func testValidationScrollsTheFirstInvalidFieldIntoView() throws {
         let form = MacOSInputFormController(
             request: PromptRequest(
@@ -877,35 +752,6 @@ final class MacOSInputFormTests: XCTestCase {
             return scrollView.contentView.bounds.contains(targetFrame)
                 && scrollView.contentView.bounds.origin.y < scrolledOffset
         })
-    }
-
-    func testReactivationRestoresTheExistingPromptWindow() {
-        let form = MacOSInputFormController(
-            request: PromptRequest(
-                title: "Reactivate prompt",
-                fields: [
-                    PromptField(id: "name", label: "Name", type: .text)
-                ]
-            )
-        ) { _ in }
-        let applicationDelegate = PromptApplicationDelegate(
-            window: form.window
-        )
-        form.window.orderFront(nil)
-        form.window.miniaturize(nil)
-
-        let shouldCreateWindow = applicationDelegate
-            .applicationShouldHandleReopen(
-                NSApplication.shared,
-                hasVisibleWindows: false
-            )
-
-        XCTAssertFalse(shouldCreateWindow)
-        XCTAssertTrue(wait {
-            !form.window.isMiniaturized && form.window.isVisible
-        })
-        XCTAssertIdentical(applicationDelegate.window, form.window)
-        form.window.orderOut(nil)
     }
 
     private func wait(
@@ -1076,7 +922,7 @@ final class MacOSInputFormTests: XCTestCase {
                 in: try XCTUnwrap(form.window.contentView)
             ) as? NSTextField
         )
-        XCTAssertEqual(appendTemplate.stringValue, "TOKEN={{ api_token }}\n")
+        XCTAssertEqual(appendTemplate.stringValue, "TOKEN={{ api_token }}")
         XCTAssertTrue(appendTemplate.isSelectable)
 
         form.detailsButton.performClick(nil)
@@ -1198,22 +1044,5 @@ private final class CursorRecordingButton: KeyKongPointerButton {
     override func addCursorRect(_ rect: NSRect, cursor object: NSCursor) {
         recordedCursors.append(object)
         super.addCursorRect(rect, cursor: object)
-    }
-}
-
-private final class BoolRecorder: @unchecked Sendable {
-    private let lock = NSLock()
-    private var recordedValues: [Bool] = []
-
-    var values: [Bool] {
-        lock.lock()
-        defer { lock.unlock() }
-        return recordedValues
-    }
-
-    func append(_ value: Bool) {
-        lock.lock()
-        defer { lock.unlock() }
-        recordedValues.append(value)
     }
 }
