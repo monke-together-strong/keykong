@@ -561,6 +561,14 @@ describe("built CLI response request", () => {
         content: '==  export A="first\nAPI_TOKEN=shadow\nsecond"\n',
       },
       {
+        name: "multiline-export-hash-key",
+        content: 'export #BAD="first\nAPI_TOKEN=shadow\nsecond"\n',
+      },
+      {
+        name: "multiline-export-empty-key",
+        content: 'export ="first\nAPI_TOKEN=shadow\nsecond"\n',
+      },
+      {
         name: "multiline-unicode-line-separator",
         content: 'OTHER="first\u2028\nAPI_TOKEN=shadow\nsecond"\n',
       },
@@ -957,6 +965,36 @@ describe("built CLI response request", () => {
     expect(result.code).toBe(1);
     expect(JSON.parse(result.stdout).failedDeliveries).toEqual(["second"]);
     expect(await readFile(target, "utf8")).toBe(`FIRST=${secret}\n`);
+
+    const duplicateTarget = join(directory, "set-env-before-duplicate.env");
+    await writeFile(duplicateTarget, "");
+    const duplicateInput = withDeliveries(duplicateTarget, [
+      {
+        id: "first",
+        path: duplicateTarget,
+        operation: "set_env",
+        key: "FIRST",
+        field: "api_token",
+      },
+      {
+        id: "second",
+        path: duplicateTarget,
+        operation: "append",
+        template: "FIRST={{ environment }}\n",
+      },
+    ]);
+
+    const duplicateResult = run(["request", "-"], {
+      stdin: duplicateInput,
+    });
+
+    expect(duplicateResult.code).toBe(1);
+    expect(JSON.parse(duplicateResult.stdout).failedDeliveries).toEqual([
+      "second",
+    ]);
+    expect(await readFile(duplicateTarget, "utf8")).toBe(
+      'FIRST="highly-secret"\n',
+    );
   });
 
   test("ordered append and insert deliveries affect the same target", async () => {

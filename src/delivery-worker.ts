@@ -41,7 +41,7 @@ async function execute(
   delivery: Delivery,
   values: Record<string, ResponseValue>,
   expected: TargetIdentity,
-  validateEnvironment: boolean,
+  protectedKeys?: ReadonlySet<string>,
 ) {
   const { handle, identity } = await openTarget(delivery.path);
   try {
@@ -52,7 +52,7 @@ async function execute(
     const content = await handle.readFile();
     const result = prepareContent(delivery, content, values);
     if (!result) throw new Error("line outside target");
-    if (validateEnvironment) validateEnvironmentContent(result);
+    if (protectedKeys) validateEnvironmentContent(result, protectedKeys);
 
     let offset = 0;
     while (offset < result.length) {
@@ -92,19 +92,29 @@ self.onmessage = async (event: MessageEvent<DeliveryWorkerRequest>) => {
       ]),
     );
     const failed: string[] = [];
-    const environmentTargets = new Set<string>();
+    const environmentTargets = new Map<string, Set<string>>();
     for (const delivery of event.data.deliveries) {
       const target = targets.get(delivery.id)!;
       const targetKey = `${target.dev}:${target.ino}`;
+      const protectedKeys = environmentTargets.get(targetKey);
+      if (
+        delivery.operation === "set_env" &&
+        protectedKeys?.has(delivery.key)
+      ) {
+        failed.push(delivery.id);
+        continue;
+      }
       try {
         await execute(
           delivery,
           event.data.values,
           target,
-          environmentTargets.has(targetKey),
+          protectedKeys,
         );
         if (delivery.operation === "set_env") {
-          environmentTargets.add(targetKey);
+          const keys = protectedKeys ?? new Set<string>();
+          keys.add(delivery.key);
+          environmentTargets.set(targetKey, keys);
         }
       } catch {
         failed.push(delivery.id);

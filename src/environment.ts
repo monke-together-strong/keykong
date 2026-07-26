@@ -97,6 +97,22 @@ function validateTarget(
   return [...endings][0] ?? "\n";
 }
 
+function activeAssignments(
+  lines: PhysicalLine[],
+  key: string,
+): Array<{ index: number; prefix: string }> {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const active = new RegExp(
+    `^(${prefixPattern}${escapedKey}[\\t ]*=)(.*)$`,
+    "s",
+  );
+  return lines.flatMap(({ body }, index) => {
+    if (trimHorizontalStart(body).startsWith("#")) return [];
+    const match = active.exec(body);
+    return match ? [{ index, prefix: match[1]! }] : [];
+  });
+}
+
 function serialize(value: string): string {
   // Submission validation rejects physical line breaks before delivery.
   // Node expands a literal \n sequence only inside double quotes.
@@ -119,8 +135,17 @@ function serialize(value: string): string {
   throw new Error("value cannot be represented losslessly");
 }
 
-export function validateEnvironmentContent(content: Buffer): void {
-  validateTarget(decodeLines(content));
+export function validateEnvironmentContent(
+  content: Buffer,
+  protectedKeys: ReadonlySet<string>,
+): void {
+  const lines = decodeLines(content);
+  validateTarget(lines);
+  for (const key of protectedKeys) {
+    if (activeAssignments(lines, key).length !== 1) {
+      throw new Error("protected assignment changed");
+    }
+  }
 }
 
 export function setEnvironmentAssignment(
@@ -129,16 +154,7 @@ export function setEnvironmentAssignment(
   value: string,
 ): Buffer {
   const lines = decodeLines(content);
-  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const active = new RegExp(
-    `^(${prefixPattern}${escapedKey}[\\t ]*=)(.*)$`,
-    "s",
-  );
-  const matches = lines.flatMap(({ body }, index) => {
-    if (trimHorizontalStart(body).startsWith("#")) return [];
-    const match = active.exec(body);
-    return match ? [{ index, prefix: match[1]! }] : [];
-  });
+  const matches = activeAssignments(lines, key);
   if (matches.length > 1) throw new Error("duplicate active key");
   const lineEnding = validateTarget(lines, matches[0]?.index);
 
