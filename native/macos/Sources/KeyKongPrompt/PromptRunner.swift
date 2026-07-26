@@ -5,6 +5,7 @@ public enum PromptRunner {
     public static func run(_ request: PromptRequest) -> PromptOutcome {
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
+        app.mainMenu = makeMainMenu()
 
         var outcome = PromptOutcome.cancelled
         let form = MacOSInputFormController(request: request) {
@@ -24,5 +25,25 @@ public enum PromptRunner {
         app.runModal(for: form.window)
         form.window.orderOut(nil)
         return outcome
+    }
+
+    private static func makeMainMenu() -> NSMenu {
+        let mainMenu = NSMenu()
+        let editMenu = NSMenu(title: "Edit")
+        let editItem = NSMenuItem(
+            title: "Edit",
+            action: nil,
+            keyEquivalent: ""
+        )
+        editItem.submenu = editMenu
+        mainMenu.addItem(editItem)
+        editMenu.addItem(
+            NSMenuItem(
+                title: "Paste",
+                action: #selector(NSText.paste(_:)),
+                keyEquivalent: "v"
+            )
+        )
+        return mainMenu
     }
 }

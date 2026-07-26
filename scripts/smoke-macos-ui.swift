@@ -68,6 +68,35 @@ private func windows(of application: AXUIElement) -> [AXUIElement] {
     return values as? [AXUIElement] ?? []
 }
 
+private func descendants(of element: AXUIElement) -> [AXUIElement] {
+    guard let children = attribute(
+        kAXChildrenAttribute as CFString,
+        of: element,
+        as: [AXUIElement].self
+    ) else {
+        return []
+    }
+    return children + children.flatMap(descendants)
+}
+
+private func postPaste(to processID: pid_t) {
+    let source = CGEventSource(stateID: .combinedSessionState)
+    let keyDown = CGEvent(
+        keyboardEventSource: source,
+        virtualKey: 9,
+        keyDown: true
+    )
+    keyDown?.flags = .maskCommand
+    let keyUp = CGEvent(
+        keyboardEventSource: source,
+        virtualKey: 9,
+        keyDown: false
+    )
+    keyUp?.flags = .maskCommand
+    keyDown?.postToPid(processID)
+    keyUp?.postToPid(processID)
+}
+
 private func postEscape(to processID: pid_t) {
     let source = CGEventSource(stateID: .combinedSessionState)
     let keyDown = CGEvent(
@@ -210,6 +239,49 @@ let reactivatedWindows = windows(of: application)
 guard reactivatedWindows.count == 1,
       CFEqual(originalWindow, reactivatedWindows[0]) else {
     try fail("reactivation created a second prompt window")
+}
+
+let pasteboard = NSPasteboard.general
+let originalPasteboardItems: [NSPasteboardItem] =
+    pasteboard.pasteboardItems?.map { item -> NSPasteboardItem in
+        let copy = NSPasteboardItem()
+        for type in item.types {
+            if let data = item.data(forType: type) {
+                copy.setData(data, forType: type)
+            }
+        }
+        return copy
+    } ?? []
+defer {
+    pasteboard.clearContents()
+    pasteboard.writeObjects(originalPasteboardItems as [NSPasteboardWriting])
+}
+let pastedValue = "keykong-paste-smoke"
+pasteboard.clearContents()
+pasteboard.setString(pastedValue, forType: .string)
+
+guard let textField = descendants(of: originalWindow).first(where: {
+    attribute(kAXRoleAttribute as CFString, of: $0, as: String.self)
+        == (kAXTextFieldRole as String)
+}) else {
+    try fail("packaged Prompt Adapter has no accessible text field")
+}
+guard AXUIElementSetAttributeValue(
+    textField,
+    kAXFocusedAttribute as CFString,
+    kCFBooleanTrue
+) == .success else {
+    try fail("packaged Prompt Adapter text field could not be focused")
+}
+postPaste(to: process.processIdentifier)
+guard wait(timeout: 1, until: {
+    attribute(
+        kAXValueAttribute as CFString,
+        of: textField,
+        as: String.self
+    ) == pastedValue
+}) else {
+    try fail("paste did not update the packaged Prompt Adapter text field")
 }
 
 postEscape(to: process.processIdentifier)
