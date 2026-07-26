@@ -565,6 +565,14 @@ describe("built CLI response request", () => {
         content: "API_TOKEN= \nOTHER=one\n",
       },
       {
+        name: "empty-key-prefixed-assignment",
+        content: "=API_TOKEN=shadow\n",
+      },
+      {
+        name: "empty-key-prefixed-duplicate",
+        content: "=API_TOKEN=one\nAPI_TOKEN=two\n",
+      },
+      {
         name: "bom-prefixed-multiline-assignment",
         content: '\uFEFF# OTHER="first\nAPI_TOKEN=shadow\nsecond"\n',
       },

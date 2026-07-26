@@ -53,7 +53,11 @@ function validateTarget(
   if (endings.size > 1) throw new Error("mixed line endings");
 
   for (const [index, { body }] of lines.entries()) {
-    if (trimHorizontalStart(body).startsWith("#")) continue;
+    const trimmedBody = trimHorizontalStart(body);
+    if (trimmedBody.startsWith("#")) continue;
+    if (trimmedBody.startsWith("=")) {
+      throw new Error("leading empty key");
+    }
     const assignment = assignmentPattern.exec(body);
     const rawRightHandSide = assignment?.[1];
     if (
