@@ -166,19 +166,21 @@ final class MacOSInputFormTests: XCTestCase {
     }
 
     func testDetailsResolveCanonicallyEquivalentFieldIDsExactly() {
+        let precomposed = "\u{AC00}"
+        let decomposed = "\u{1100}\u{1161}"
         let form = MacOSInputFormController(
             request: PromptRequest(
                 title: "Exact field identity",
                 fields: [
-                    PromptField(id: "가", label: "Precomposed", type: .text),
-                    PromptField(id: "가", label: "Decomposed", type: .text)
+                    PromptField(id: precomposed, label: "Precomposed", type: .text),
+                    PromptField(id: decomposed, label: "Decomposed", type: .text)
                 ],
                 deliveries: [
                     PromptDelivery(
                         path: "/tmp/existing.env",
                         operation: .setEnv,
                         key: "VALUE",
-                        field: "가"
+                        field: decomposed
                     )
                 ]
             )

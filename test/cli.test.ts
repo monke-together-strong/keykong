@@ -679,7 +679,7 @@ describe("built CLI response request", () => {
     await writeFile(inaccessibleTarget, "");
     await writeFile(
       capturedTarget,
-      "API_TOKEN=one\nAPI_TOKEN=two\n",
+      "OTHER=one\n",
     );
     await createHardLink(target, hardlinkTarget);
     await createHardLink(capturedTarget, capturedAlias);
@@ -777,11 +777,30 @@ describe("built CLI response request", () => {
             id: "first",
             path: capturedTarget,
             operation: "append",
-            template: "# {{ environment }}\n",
+            template: "API_TOKEN=one\nAPI_TOKEN={{ environment }}\n",
           },
           {
             id: "second",
             path: capturedAlias,
+            operation: "set_env",
+            key: "API_TOKEN",
+            field: "api_token",
+          },
+        ]),
+      },
+      {
+        name: "inserted-content-before-set-env",
+        input: withDeliveries(target, [
+          {
+            id: "first",
+            path: target,
+            operation: "insert_line",
+            line: 1,
+            template: "API_TOKEN=one\nAPI_TOKEN={{ environment }}\n",
+          },
+          {
+            id: "second",
+            path: target,
             operation: "set_env",
             key: "API_TOKEN",
             field: "api_token",
@@ -823,7 +842,7 @@ describe("built CLI response request", () => {
         expect(await Bun.file(marker).exists()).toBeFalse();
       }
       expect(await readFile(capturedTarget, "utf8")).toBe(
-        "API_TOKEN=one\nAPI_TOKEN=two\n",
+        "OTHER=one\n",
       );
     } finally {
       await chmod(inaccessibleTarget, 0o600);
@@ -1426,13 +1445,15 @@ describe("built CLI response request", () => {
         KEY_KONG_TEST_DELIVERY_PID_MARKER: pidMarker,
       },
     });
+    const stdout = new Response(child.stdout).text();
+    const stderr = new Response(child.stderr).text();
 
     expect(await child.exited).toBe(1);
-    expect(await new Response(child.stdout).text()).toBe(
+    expect(await stdout).toBe(
       '{"status":"expired","values":{}}\n',
     );
+    expect(await stderr).toBe("request deadline expired\n");
     expect(Number(await readFile(pidMarker, "utf8"))).toBe(child.pid);
-    await Bun.sleep(250);
     expect(await readFile(target, "utf8")).toBe("");
   });
 
@@ -1450,12 +1471,14 @@ describe("built CLI response request", () => {
         KEY_KONG_TEST_BLOCK_WRITE_MS: "200",
       },
     });
+    const stdout = new Response(child.stdout).text();
+    const stderr = new Response(child.stderr).text();
 
     expect(await child.exited).toBe(1);
-    expect(await new Response(child.stdout).text()).toBe(
+    expect(await stdout).toBe(
       '{"status":"expired","values":{}}\n',
     );
-    await Bun.sleep(250);
+    expect(await stderr).toBe("request deadline expired\n");
     expect(await readFile(target, "utf8")).toBe("API_TOKEN=old\n");
   });
 

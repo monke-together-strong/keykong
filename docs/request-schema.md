@@ -77,7 +77,7 @@ options.
 
 `append` requires `template` and forbids `line`. `insert_line` requires both
 `template` and a positive, one-based `line`. `set_env` requires `key` and
-`field`, and forbids `template`, `line`, and dialect selectors. Environment
+`field`, and forbids `template` and `line`. Environment
 keys match `^[A-Za-z_][A-Za-z0-9_]*$`; source Fields must be single-valued.
 Repeated `(path, key)` pairs in one Request are invalid.
 

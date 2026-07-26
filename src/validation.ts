@@ -1,9 +1,10 @@
 import { isAbsolute } from "node:path";
+import { insertBeforeLine } from "./content";
 import { DeadlineExpired, type Deadline } from "./deadline";
 import { KeyKongError } from "./errors";
 import { setEnvironmentAssignment } from "./environment";
 import { requestLimits } from "./limits";
-import { parseTemplate } from "./template";
+import { parseTemplate, renderTemplate } from "./template";
 import { openTarget, type TargetIdentity } from "./target";
 import type {
   Delivery,
@@ -324,6 +325,14 @@ export async function validateRequest(
 
   const fields = value.fields.map((field) => validateField(field, deadline));
   const fieldsByID = new Map(fields.map((field) => [field.id, field]));
+  const validationValues = Object.fromEntries(
+    fields.map((field) => [
+      field.id,
+      field.type === "multi_select"
+        ? ["key-kong-validation"]
+        : "key-kong-validation",
+    ]),
+  ) as Record<string, ResponseValue>;
   if (fieldsByID.size !== fields.length) invalid("field IDs must be unique");
   const validatedDeliveries = ((value.deliveries ?? []) as unknown[]).map((delivery) =>
     validateDelivery(delivery, fieldsByID, deadline)
@@ -362,11 +371,6 @@ export async function validateRequest(
   }
 
   const targets = new Map<string, TargetIdentity>();
-  const environmentTargetPaths = new Set(
-    deliveries.flatMap((delivery) =>
-      delivery.operation === "set_env" ? [delivery.path] : []
-    ),
-  );
   const inspectedTargets = new Map<
     string,
     { identity: TargetIdentity; lines: number; content?: Buffer }
@@ -376,14 +380,24 @@ export async function validateRequest(
     { identity: TargetIdentity; lines: number; content?: Buffer }
   >();
   const environmentKeysByTarget = new Map<string, Set<string>>();
+  for (const delivery of deliveries) {
+    if (
+      delivery.operation !== "set_env" ||
+      inspectedTargets.has(delivery.path)
+    ) {
+      continue;
+    }
+    const target = await inspectTarget(delivery, deadline, true);
+    const targetKey = `${target.identity.dev}:${target.identity.ino}`;
+    inspectedTargets.set(delivery.path, target);
+    if (!inspectedTargetsByIdentity.has(targetKey)) {
+      inspectedTargetsByIdentity.set(targetKey, target);
+    }
+  }
   for (const [index, delivery] of deliveries.entries()) {
     deadline.assertActive();
     const inspectedTarget = inspectedTargets.get(delivery.path) ??
-      await inspectTarget(
-        delivery,
-        deadline,
-        environmentTargetPaths.has(delivery.path),
-      );
+      await inspectTarget(delivery, deadline, false);
     const targetKey =
       `${inspectedTarget.identity.dev}:${inspectedTarget.identity.ino}`;
     const cachedTarget = inspectedTargetsByIdentity.get(targetKey);
@@ -424,13 +438,23 @@ export async function validateRequest(
         );
       }
     } else {
-      nextLines = simulateDelivery(
-        delivery,
-        validatedDeliveries[index]!.literal,
-        validatedDeliveries[index]!.trailingLiteral,
-        target.lines,
-      );
-      nextContent = target.content;
+      if (target.content) {
+        const rendered = renderTemplate(delivery.template, validationValues);
+        nextContent = delivery.operation === "append"
+          ? Buffer.concat([target.content, rendered])
+          : insertBeforeLine(target.content, delivery.line, rendered);
+        if (!nextContent) {
+          invalid(`delivery '${delivery.id}' line is outside the target`);
+        }
+        nextLines = countNewlines(nextContent) + 1;
+      } else {
+        nextLines = simulateDelivery(
+          delivery,
+          validatedDeliveries[index]!.literal,
+          validatedDeliveries[index]!.trailingLiteral,
+          target.lines,
+        );
+      }
     }
     const nextTarget = {
       identity: target.identity,
