@@ -91,6 +91,13 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         let deliveryDetails = request.deliveries.map {
             Self.describe($0, fields: request.fields)
         }
+        let deliveryDetailViews = request.deliveries.enumerated().map {
+            Self.makeDeliveryDetailView(
+                $0.element,
+                fields: request.fields,
+                index: $0.offset
+            )
+        }
         self.request = request
         self.onComplete = onComplete
         self.window = KeyKongFormWindow(
@@ -112,11 +119,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
             action: nil
         )
         self.deliveryDetails = deliveryDetails
-        self.detailsView = NSStackView(
-            views: deliveryDetails.map {
-                NSTextField(wrappingLabelWithString: $0)
-            }
-        )
+        self.detailsView = NSStackView(views: deliveryDetailViews)
         super.init()
 
         configureWindow()
@@ -260,11 +263,11 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
 
         detailsView.orientation = .vertical
         detailsView.alignment = .leading
-        detailsView.spacing = 6
+        detailsView.spacing = 14
         detailsView.isHidden = true
-        for case let label as NSTextField in detailsView.arrangedSubviews {
-            label.textColor = KeyKongTheme.silver
-            label.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        for detail in detailsView.arrangedSubviews {
+            detail.widthAnchor.constraint(equalTo: detailsView.widthAnchor)
+                .isActive = true
         }
 
         let root = KeyKongBackgroundView()
@@ -664,9 +667,16 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
     ) -> String {
         switch delivery.operation {
         case .append:
-            return "\(delivery.path) — append"
+            return templateDescription(
+                summary: "\(delivery.path) — append",
+                template: delivery.template
+            )
         case .insertLine:
-            return "\(delivery.path) — insert before line \(delivery.line ?? 0)"
+            return templateDescription(
+                summary:
+                    "\(delivery.path) — insert before line \(delivery.line ?? 0)",
+                template: delivery.template
+            )
         case .setEnv:
             let field = delivery.field ?? ""
             let label = fields.first {
@@ -674,6 +684,116 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
             }?.label ?? field
             return "\(delivery.path) — set \(delivery.key ?? "") from \(label)"
         }
+    }
+
+    private static func templateDescription(
+        summary: String,
+        template: String?
+    ) -> String {
+        guard let template else {
+            return "\(summary)\nTemplate unavailable"
+        }
+        return "\(summary)\nTemplate:\n\(template)"
+    }
+
+    private static func makeDeliveryDetailView(
+        _ delivery: PromptDelivery,
+        fields: [PromptField],
+        index: Int
+    ) -> NSView {
+        let card = NSStackView()
+        card.identifier = NSUserInterfaceItemIdentifier("delivery-\(index)")
+        card.orientation = .vertical
+        card.alignment = .leading
+        card.spacing = 6
+
+        let action: String
+        switch delivery.operation {
+        case .append:
+            action = "Append to file"
+        case .insertLine:
+            action = "Insert before line \(delivery.line ?? 0)"
+        case .setEnv:
+            let field = delivery.field ?? ""
+            let label = fields.first {
+                $0.id.utf8.elementsEqual(field.utf8)
+            }?.label ?? field
+            action = "Set \(delivery.key ?? "") from \(label)"
+        }
+
+        let actionLabel = NSTextField(labelWithString: action)
+        actionLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        actionLabel.textColor = .white
+        card.addArrangedSubview(actionLabel)
+
+        let pathLabel = NSTextField(wrappingLabelWithString: delivery.path)
+        pathLabel.identifier = NSUserInterfaceItemIdentifier(
+            "delivery-\(index)-path"
+        )
+        pathLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        pathLabel.textColor = KeyKongTheme.silver
+        pathLabel.isSelectable = true
+        pathLabel.lineBreakMode = .byCharWrapping
+        card.addArrangedSubview(pathLabel)
+        pathLabel.widthAnchor.constraint(equalTo: card.widthAnchor)
+            .isActive = true
+
+        if delivery.operation != .setEnv {
+            let explanation = NSTextField(
+                labelWithString:
+                    "Template · {{ placeholders }} are replaced when sent"
+            )
+            explanation.font = .systemFont(ofSize: 11)
+            explanation.textColor = KeyKongTheme.silver
+            card.addArrangedSubview(explanation)
+
+            let templateLabel = NSTextField(
+                wrappingLabelWithString:
+                    delivery.template ?? "Template unavailable"
+            )
+            templateLabel.identifier = NSUserInterfaceItemIdentifier(
+                "delivery-\(index)-template"
+            )
+            templateLabel.font = .monospacedSystemFont(
+                ofSize: 11,
+                weight: .regular
+            )
+            templateLabel.textColor = .white
+            templateLabel.isSelectable = true
+            templateLabel.lineBreakMode = .byCharWrapping
+
+            let templateBox = NSView()
+            templateBox.wantsLayer = true
+            templateBox.layer?.backgroundColor = KeyKongTheme.graphite.cgColor
+            templateBox.layer?.borderColor = KeyKongTheme.slate.cgColor
+            templateBox.layer?.borderWidth = 1
+            templateBox.layer?.cornerRadius = 6
+            templateLabel.translatesAutoresizingMaskIntoConstraints = false
+            templateBox.addSubview(templateLabel)
+            NSLayoutConstraint.activate([
+                templateLabel.leadingAnchor.constraint(
+                    equalTo: templateBox.leadingAnchor,
+                    constant: 10
+                ),
+                templateLabel.trailingAnchor.constraint(
+                    equalTo: templateBox.trailingAnchor,
+                    constant: -10
+                ),
+                templateLabel.topAnchor.constraint(
+                    equalTo: templateBox.topAnchor,
+                    constant: 8
+                ),
+                templateLabel.bottomAnchor.constraint(
+                    equalTo: templateBox.bottomAnchor,
+                    constant: -8
+                )
+            ])
+            card.addArrangedSubview(templateBox)
+            templateBox.widthAnchor.constraint(equalTo: card.widthAnchor)
+                .isActive = true
+        }
+
+        return card
     }
 }
 

@@ -52,8 +52,13 @@ export interface PromptRequest {
   title: string;
   fields: Field[];
   deliveries: Array<
-    | { path: string; operation: "append" }
-    | { path: string; operation: "insert_line"; line: number }
+    | { path: string; operation: "append"; template: string }
+    | {
+      path: string;
+      operation: "insert_line";
+      line: number;
+      template: string;
+    }
     | {
       path: string;
       operation: "set_env";

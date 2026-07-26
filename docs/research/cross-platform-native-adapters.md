@@ -237,7 +237,8 @@ Bun to Swift:
   "deliveries": [
     {
       "path": "/absolute/path/to/existing.env",
-      "operation": "append"
+      "operation": "append",
+      "template": "GITHUB_TOKEN={{ github-token }}\n"
     }
   ]
 }

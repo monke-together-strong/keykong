@@ -1005,12 +1005,14 @@ final class MacOSInputFormTests: XCTestCase {
             deliveries: [
                 PromptDelivery(
                     path: "/tmp/existing.env",
-                    operation: .append
+                    operation: .append,
+                    template: "TOKEN={{ api_token }}\n"
                 ),
                 PromptDelivery(
                     path: "/tmp/settings",
                     operation: .insertLine,
-                    line: 2
+                    line: 2,
+                    template: "credentials={{ api_token }}"
                 ),
                 PromptDelivery(
                     path: "/tmp/existing.env",
@@ -1053,13 +1055,29 @@ final class MacOSInputFormTests: XCTestCase {
         XCTAssertEqual(
             form.deliveryDetails,
             [
-                "/tmp/existing.env — append",
-                "/tmp/settings — insert before line 2",
+                """
+                /tmp/existing.env — append
+                Template:
+                TOKEN={{ api_token }}
+
+                """,
+                """
+                /tmp/settings — insert before line 2
+                Template:
+                credentials={{ api_token }}
+                """,
                 "/tmp/existing.env — set API_TOKEN from API token"
             ]
         )
-        XCTAssertFalse(form.deliveryDetails.joined().contains("TOKEN="))
         XCTAssertFalse(form.deliveryDetails.joined().contains("highly-secret"))
+        let appendTemplate = try XCTUnwrap(
+            descendant(
+                "delivery-0-template",
+                in: try XCTUnwrap(form.window.contentView)
+            ) as? NSTextField
+        )
+        XCTAssertEqual(appendTemplate.stringValue, "TOKEN={{ api_token }}\n")
+        XCTAssertTrue(appendTemplate.isSelectable)
 
         form.detailsButton.performClick(nil)
         XCTAssertFalse(form.detailsView.isHidden)

@@ -10,8 +10,8 @@ if (pidMarker) await Bun.write(pidMarker, String(process.pid));
 const request = JSON.parse(await Bun.stdin.text());
 const secret = process.env.KEY_KONG_FAKE_SECRET ?? "highly-secret";
 const projectedDeliveryKeys: Record<string, string[]> = {
-  append: ["path", "operation"],
-  insert_line: ["path", "operation", "line"],
+  append: ["path", "operation", "template"],
+  insert_line: ["path", "operation", "line", "template"],
   set_env: ["path", "operation", "key", "field"],
 };
 if (

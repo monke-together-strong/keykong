@@ -68,6 +68,13 @@ const request = {
       key: "DEPLOY_TOKEN",
       field: "deploy_token",
     },
+    {
+      id: "deployment_summary",
+      path: target,
+      operation: "append",
+      template:
+        "# Deploy {{ environment }} to {{ region }} with {{ features }}\n",
+    },
   ],
 };
 

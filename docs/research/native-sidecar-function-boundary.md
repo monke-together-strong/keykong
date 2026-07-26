@@ -60,6 +60,7 @@ type NativePromptRequest = {
     path: string;
     operation: "append" | "insert_line";
     line?: number;
+    template: string;
   }>;
 };
 
@@ -75,8 +76,8 @@ The exact schema can grow when the native UI needs another argument or result,
 just as an ordinary function signature would. It does not need to anticipate
 Windows, web, third-party adapters, or independently versioned helpers. Bun
 derives this presentation model from the validated application request:
-delivery templates and execution objects never cross the native boundary, while
-the sanitized paths and operations needed by the existing Details view do.
+validated delivery templates cross the native boundary so the user can review
+the proposed write, while execution objects and submitted values do not.
 
 ## Transport rules
 
@@ -171,9 +172,10 @@ mocked units.
 
 Keep only a few focused Swift tests for behavior that the fake helper cannot
 prove: rendering every field kind, returning stable option values rather than
-labels, masking and clearing secret input, showing sanitized delivery details,
-and cancelling the native form. A small contract check also ensures the real
-helper decodes the request and encodes the response expected by Bun.
+labels, masking and clearing secret input, showing templates without submitted
+values in delivery details, and cancelling the native form. A small contract
+check also ensures the real helper decodes the request and encodes the response
+expected by Bun.
 
 ## Future web implementation
 

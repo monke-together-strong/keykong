@@ -28,6 +28,7 @@ export async function prompt(
           path: delivery.path,
           operation: delivery.operation,
           line: delivery.line,
+          template: delivery.template,
         };
       }
       if (delivery.operation === "set_env") {
@@ -38,7 +39,11 @@ export async function prompt(
           field: delivery.field,
         };
       }
-      return { path: delivery.path, operation: delivery.operation };
+      return {
+        path: delivery.path,
+        operation: delivery.operation,
+        template: delivery.template,
+      };
     }),
   };
 
