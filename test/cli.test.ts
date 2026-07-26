@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import {
   chmod,
-  link,
+  link as createHardLink,
   mkdir,
   mkdtemp,
   readFile,
@@ -593,6 +593,10 @@ describe("built CLI response request", () => {
         content: "=API_TOKEN=one\nAPI_TOKEN=two\n",
       },
       {
+        name: "spaced-empty-key-prefixed-assignment",
+        content: "= =API_TOKEN=shadow\n",
+      },
+      {
         name: "bom-prefixed-multiline-assignment",
         content: '\uFEFF# OTHER="first\nAPI_TOKEN=shadow\nsecond"\n',
       },
@@ -659,8 +663,10 @@ describe("built CLI response request", () => {
     const link = join(directory, "set-env-validated-link.env");
     const directoryTarget = join(directory, "set-env-directory");
     const inaccessibleTarget = join(directory, "set-env-inaccessible.env");
+    const hardlinkTarget = join(directory, "set-env-hardlink.env");
     await writeFile(target, "");
     await writeFile(inaccessibleTarget, "");
+    await createHardLink(target, hardlinkTarget);
     await chmod(inaccessibleTarget, 0o400);
     await symlink(target, link);
     await mkdir(directoryTarget);
@@ -723,6 +729,25 @@ describe("built CLI response request", () => {
           {
             id: "second",
             path: target,
+            operation: "set_env",
+            key: "TOKEN",
+            field: "api_token",
+          },
+        ]),
+      },
+      {
+        name: "repeated-identity-key",
+        input: withDeliveries(target, [
+          {
+            id: "first",
+            path: target,
+            operation: "set_env",
+            key: "TOKEN",
+            field: "api_token",
+          },
+          {
+            id: "second",
+            path: hardlinkTarget,
             operation: "set_env",
             key: "TOKEN",
             field: "api_token",
@@ -940,7 +965,7 @@ describe("built CLI response request", () => {
     const target = join(directory, "set-env-before-hardlink.env");
     const alias = join(directory, "set-env-before-hardlink-alias.env");
     await writeFile(target, "");
-    await link(target, alias);
+    await createHardLink(target, alias);
     const input = withDeliveries(target, [
       {
         id: "first",

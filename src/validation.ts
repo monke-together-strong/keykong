@@ -371,6 +371,7 @@ export async function validateRequest(
     string,
     { identity: TargetIdentity; lines: number; content?: Buffer }
   >();
+  const environmentKeysByTarget = new Map<string, Set<string>>();
   for (const [index, delivery] of deliveries.entries()) {
     deadline.assertActive();
     const target = inspectedTargets.get(delivery.path) ??
@@ -378,8 +379,20 @@ export async function validateRequest(
         delivery,
         deadline,
         environmentTargetPaths.has(delivery.path),
-      );
+    );
     targets.set(delivery.id, target.identity);
+    if (delivery.operation === "set_env") {
+      const targetKey = `${target.identity.dev}:${target.identity.ino}`;
+      const assignedKeys = environmentKeysByTarget.get(targetKey) ??
+        new Set<string>();
+      if (assignedKeys.has(delivery.key)) {
+        invalid(
+          `set_env deliveries for the same target key '${delivery.key}' must be unique`,
+        );
+      }
+      assignedKeys.add(delivery.key);
+      environmentKeysByTarget.set(targetKey, assignedKeys);
+    }
     let nextLines: number;
     let nextContent: Buffer | undefined;
     if (delivery.operation === "set_env") {

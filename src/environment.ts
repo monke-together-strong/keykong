@@ -10,7 +10,7 @@ const assignmentPattern = new RegExp(
   "s",
 );
 const hiddenAssignmentPattern =
-  /^=+[\t ]*(?:export [\t ]*)?[A-Za-z_][A-Za-z0-9_]*[\t ]*=/;
+  /^(?:=[\t ]*)+(?:export [\t ]*)?[A-Za-z_][A-Za-z0-9_]*[\t ]*=/;
 
 function trimHorizontalStart(value: string): string {
   return value.replace(/^[\t ]*/, "");
