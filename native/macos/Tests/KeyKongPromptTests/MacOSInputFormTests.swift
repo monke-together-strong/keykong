@@ -229,6 +229,266 @@ final class MacOSInputFormTests: XCTestCase {
         )
     }
 
+    func testKeyboardNavigationAndFeatureTogglingFollowFormConventions() throws {
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Keyboard navigation",
+                fields: [
+                    PromptField(
+                        id: "token",
+                        label: "Deploy token",
+                        type: .secret
+                    ),
+                    PromptField(
+                        id: "environment",
+                        label: "Environment",
+                        type: .text
+                    ),
+                    PromptField(
+                        id: "region",
+                        label: "Region",
+                        type: .select,
+                        options: [
+                            PromptOption(label: "Oregon", value: "us-west-2"),
+                            PromptOption(label: "Virginia", value: "us-east-1")
+                        ]
+                    ),
+                    PromptField(
+                        id: "features",
+                        label: "Features",
+                        type: .multiSelect,
+                        options: [
+                            PromptOption(label: "Audit", value: "audit"),
+                            PromptOption(label: "Alerts", value: "alerts")
+                        ]
+                    )
+                ]
+            )
+        ) { _ in }
+        let secret = try XCTUnwrap(
+            form.inputViews[0] as? SecretInputView
+        )
+        let environment = try XCTUnwrap(
+            form.inputViews[1] as? NSTextField
+        )
+        let region = try XCTUnwrap(
+            form.inputViews[2] as? KeyKongPopUpButton
+        )
+        let features = try XCTUnwrap(
+            form.inputViews[3] as? NSStackView
+        ).arrangedSubviews.compactMap { $0 as? KeyKongCheckboxButton }
+        let firstFeature = try XCTUnwrap(features.first)
+        let secondFeature = try XCTUnwrap(features.last)
+
+        XCTAssertFalse(form.window.autorecalculatesKeyViewLoop)
+        XCTAssertTrue(
+            secret.secureTextField.nextKeyView
+                === secret.revealedTextField
+        )
+        XCTAssertTrue(secret.revealedTextField.nextKeyView === environment)
+        XCTAssertFalse(secret.revealButton === secret.secureTextField.nextKeyView)
+        XCTAssertFalse(secret.revealButton === secret.revealedTextField.nextKeyView)
+        XCTAssertTrue(environment.nextKeyView === region)
+        XCTAssertTrue(region.nextKeyView === firstFeature)
+        XCTAssertTrue(firstFeature.nextKeyView === secondFeature)
+        XCTAssertTrue(region.acceptsFirstResponder)
+        XCTAssertTrue(features.allSatisfy(\.acceptsFirstResponder))
+
+        XCTAssertTrue(form.window.makeFirstResponder(secret.secureTextField))
+        form.window.sendEvent(keyDown(keyCode: 48, characters: "\t"))
+        XCTAssertTrue(focusedControl(in: form.window) === environment)
+
+        form.window.sendEvent(
+            keyDown(
+                keyCode: 48,
+                characters: "\t",
+                modifiers: .shift
+            )
+        )
+        XCTAssertTrue(
+            focusedControl(in: form.window) === secret.secureTextField
+        )
+
+        form.window.sendEvent(keyDown(keyCode: 48, characters: "\t"))
+        XCTAssertTrue(focusedControl(in: form.window) === environment)
+        form.window.sendEvent(keyDown(keyCode: 48, characters: "\t"))
+        XCTAssertTrue(focusedControl(in: form.window) === region)
+
+        form.window.sendEvent(
+            keyDown(
+                keyCode: 48,
+                characters: "\t",
+                modifiers: .shift
+            )
+        )
+        XCTAssertTrue(focusedControl(in: form.window) === environment)
+
+        form.window.sendEvent(keyDown(keyCode: 48, characters: "\t"))
+        form.window.sendEvent(keyDown(keyCode: 48, characters: "\t"))
+        XCTAssertTrue(focusedControl(in: form.window) === firstFeature)
+
+        XCTAssertTrue(
+            form.window.performKeyEquivalent(
+                with: keyDown(keyCode: 36, characters: "\r")
+            )
+        )
+        XCTAssertEqual(firstFeature.state, .on)
+
+        form.window.sendEvent(keyDown(keyCode: 48, characters: "\t"))
+        XCTAssertTrue(focusedControl(in: form.window) === secondFeature)
+        form.window.sendEvent(
+            keyDown(
+                keyCode: 48,
+                characters: "\t",
+                modifiers: .shift
+            )
+        )
+        XCTAssertTrue(focusedControl(in: form.window) === firstFeature)
+    }
+
+    func testEnterOpensTheFocusedRegionMenu() {
+        let window = KeyKongFormWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 100),
+            styleMask: .titled,
+            backing: .buffered,
+            defer: false
+        )
+        let region = ClickRecordingPopUpButton()
+        window.contentView = region
+
+        XCTAssertTrue(window.makeFirstResponder(region))
+        XCTAssertTrue(
+            window.performKeyEquivalent(
+                with: keyDown(keyCode: 36, characters: "\r")
+            )
+        )
+        XCTAssertEqual(region.clickCount, 1)
+    }
+
+    func testEnterTogglesTheFocusedDetailsControl() {
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Keyboard details",
+                fields: [
+                    PromptField(
+                        id: "environment",
+                        label: "Environment",
+                        type: .text
+                    )
+                ],
+                deliveries: [
+                    PromptDelivery(path: "/tmp/output", operation: .append)
+                ]
+            )
+        ) { _ in }
+
+        XCTAssertTrue(form.window.makeFirstResponder(form.detailsButton))
+        XCTAssertTrue(
+            form.window.performKeyEquivalent(
+                with: keyDown(keyCode: 36, characters: "\r")
+            )
+        )
+        XCTAssertEqual(form.detailsButton.state, .on)
+        XCTAssertFalse(form.detailsView.isHidden)
+
+        XCTAssertTrue(
+            form.window.performKeyEquivalent(
+                with: keyDown(keyCode: 36, characters: "\r")
+            )
+        )
+        XCTAssertEqual(form.detailsButton.state, .off)
+        XCTAssertTrue(wait { form.detailsView.isHidden })
+    }
+
+    func testShiftEnterSubmitsWithoutFocusingFooterButtons() throws {
+        var outcome: PromptOutcome?
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Keyboard submission",
+                fields: [
+                    PromptField(
+                        id: "environment",
+                        label: "Environment",
+                        type: .text
+                    )
+                ],
+                deliveries: [
+                    PromptDelivery(path: "/tmp/output", operation: .append)
+                ]
+            )
+        ) {
+            outcome = $0
+        }
+        let environment = try XCTUnwrap(
+            form.inputViews.first as? NSTextField
+        )
+        environment.stringValue = "production"
+
+        XCTAssertTrue(environment.nextKeyView === form.detailsButton)
+        XCTAssertTrue(form.detailsButton.nextKeyView === environment)
+        XCTAssertFalse(environment.nextKeyView === form.cancelButton)
+        XCTAssertFalse(environment.nextKeyView === form.sendButton)
+        XCTAssertTrue(form.window.makeFirstResponder(form.detailsButton))
+
+        form.window.sendEvent(keyDown(keyCode: 48, characters: "\t"))
+        XCTAssertTrue(focusedControl(in: form.window) === environment)
+        form.window.sendEvent(
+            keyDown(
+                keyCode: 48,
+                characters: "\t",
+                modifiers: .shift
+            )
+        )
+        XCTAssertTrue(focusedControl(in: form.window) === form.detailsButton)
+
+        XCTAssertTrue(
+            form.window.performKeyEquivalent(
+                with: keyDown(
+                    keyCode: 36,
+                    characters: "\r",
+                    modifiers: .shift
+                )
+            )
+        )
+        XCTAssertEqual(
+            outcome,
+            .submitted(["environment": .text("production")])
+        )
+    }
+
+    func testEnterSubmitsFromATextField() throws {
+        var outcome: PromptOutcome?
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Text field submission",
+                fields: [
+                    PromptField(
+                        id: "environment",
+                        label: "Environment",
+                        type: .text
+                    )
+                ]
+            )
+        ) {
+            outcome = $0
+        }
+        let environment = try XCTUnwrap(
+            form.inputViews.first as? NSTextField
+        )
+        environment.stringValue = "production"
+
+        XCTAssertTrue(form.window.makeFirstResponder(environment))
+        XCTAssertTrue(
+            form.window.performKeyEquivalent(
+                with: keyDown(keyCode: 36, characters: "\r")
+            )
+        )
+        XCTAssertEqual(
+            outcome,
+            .submitted(["environment": .text("production")])
+        )
+    }
+
     func testLongFormsStartAtTheTopWithUniformInputHeights() throws {
         let form = MacOSInputFormController(
             request: PromptRequest(
@@ -277,6 +537,96 @@ final class MacOSInputFormTests: XCTestCase {
         )
         for view in form.inputViews.prefix(3) {
             XCTAssertEqual(view.frame.height, 36, accuracy: 0.5)
+        }
+    }
+
+    func testCompactFormsShowAllOptionsWithoutScrolling() throws {
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Deploy",
+                fields: [
+                    PromptField(
+                        id: "environment",
+                        label: "Environment",
+                        type: .text
+                    ),
+                    PromptField(
+                        id: "region",
+                        label: "Region",
+                        type: .select,
+                        options: [
+                            PromptOption(label: "Oregon", value: "us-west-2")
+                        ]
+                    ),
+                    PromptField(
+                        id: "features",
+                        label: "Features",
+                        type: .multiSelect,
+                        options: [
+                            PromptOption(label: "Audit", value: "audit"),
+                            PromptOption(label: "Alerts", value: "alerts")
+                        ]
+                    )
+                ]
+            )
+        ) { _ in }
+        let root = try XCTUnwrap(form.window.contentView)
+        root.layoutSubtreeIfNeeded()
+        let scrollView = try XCTUnwrap(
+            descendant("form-scroll", in: root) as? NSScrollView
+        )
+        let featureButtons = try XCTUnwrap(
+            form.inputViews[2] as? NSStackView
+        ).arrangedSubviews
+
+        XCTAssertEqual(scrollView.contentView.bounds.minY, 0, accuracy: 0.5)
+        for button in featureButtons {
+            XCTAssertTrue(
+                scrollView.contentView.bounds.contains(
+                    button.convert(button.bounds, to: scrollView.contentView)
+                ),
+                "\(button.identifier?.rawValue ?? "Feature") should be visible"
+            )
+        }
+    }
+
+    func testFormControlsLeaveRoomForFocusRingsAndRoundedEdges() throws {
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Deploy",
+                fields: [
+                    PromptField(
+                        id: "environment",
+                        label: "Environment",
+                        type: .text
+                    ),
+                    PromptField(
+                        id: "region",
+                        label: "Region",
+                        type: .select,
+                        options: [
+                            PromptOption(label: "Oregon", value: "us-west-2")
+                        ]
+                    )
+                ]
+            )
+        ) { _ in }
+        let root = try XCTUnwrap(form.window.contentView)
+        root.layoutSubtreeIfNeeded()
+        let scrollView = try XCTUnwrap(
+            descendant("form-scroll", in: root) as? NSScrollView
+        )
+        let renderingBounds = scrollView.contentView.bounds.insetBy(
+            dx: 4,
+            dy: 0
+        )
+
+        for input in form.inputViews {
+            let frame = input.convert(
+                input.bounds,
+                to: scrollView.contentView
+            )
+            XCTAssertTrue(renderingBounds.contains(frame))
         }
     }
 
@@ -353,6 +703,93 @@ final class MacOSInputFormTests: XCTestCase {
             collapsedFrame.maxY,
             accuracy: 0.5
         )
+    }
+
+    func testDetailsCollapseKeepsTheDetailsControlVisible() throws {
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Credentials needed",
+                fields: [
+                    PromptField(
+                        id: "github_token",
+                        label: "GitHub token",
+                        type: .secret
+                    ),
+                    PromptField(
+                        id: "deploy_token",
+                        label: "Deploy token",
+                        type: .secret
+                    ),
+                    PromptField(
+                        id: "environment",
+                        label: "Environment",
+                        type: .text
+                    ),
+                    PromptField(
+                        id: "region",
+                        label: "Region",
+                        type: .select,
+                        options: [
+                            PromptOption(label: "Oregon", value: "us-west-2")
+                        ]
+                    ),
+                    PromptField(
+                        id: "features",
+                        label: "Features",
+                        type: .multiSelect,
+                        options: [
+                            PromptOption(label: "Audit", value: "audit"),
+                            PromptOption(label: "Alerts", value: "alerts"),
+                            PromptOption(label: "Previews", value: "previews")
+                        ]
+                    )
+                ],
+                deliveries: [
+                    PromptDelivery(path: "/tmp/one", operation: .append),
+                    PromptDelivery(path: "/tmp/two", operation: .append)
+                ]
+            )
+        ) { _ in }
+        let root = try XCTUnwrap(form.window.contentView)
+        let scrollView = try XCTUnwrap(
+            descendant("form-scroll", in: root) as? NSScrollView
+        )
+        form.window.center()
+        form.window.orderFront(nil)
+        root.layoutSubtreeIfNeeded()
+        form.detailsButton.scrollToVisible(form.detailsButton.bounds)
+        let collapsedScrollOffset = scrollView.contentView.bounds.origin.y
+
+        form.detailsButton.performClick(nil)
+        XCTAssertTrue(wait {
+            root.layoutSubtreeIfNeeded()
+            return !form.detailsView.isHidden
+                && scrollView.contentView.bounds.contains(
+                    form.detailsView.convert(
+                        form.detailsView.bounds,
+                        to: scrollView.contentView
+                    )
+                )
+        })
+
+        form.detailsButton.performClick(nil)
+
+        XCTAssertTrue(wait {
+            root.layoutSubtreeIfNeeded()
+            return form.detailsView.isHidden
+                && scrollView.contentView.bounds.contains(
+                    form.detailsButton.convert(
+                        form.detailsButton.bounds,
+                        to: scrollView.contentView
+                    )
+                )
+        })
+        XCTAssertEqual(
+            scrollView.contentView.bounds.origin.y,
+            collapsedScrollOffset,
+            accuracy: 0.5
+        )
+        form.window.orderOut(nil)
     }
 
     func testDetailsExpansionSuppressesTheTransientScroller() throws {
@@ -498,6 +935,32 @@ final class MacOSInputFormTests: XCTestCase {
         return view.subviews.lazy.compactMap {
             self.descendant(identifier, in: $0)
         }.first
+    }
+
+    private func focusedControl(in window: NSWindow) -> NSControl? {
+        if let control = window.firstResponder as? NSControl {
+            return control
+        }
+        return (window.firstResponder as? NSTextView)?.delegate as? NSControl
+    }
+
+    private func keyDown(
+        keyCode: UInt16,
+        characters: String,
+        modifiers: NSEvent.ModifierFlags = []
+    ) -> NSEvent {
+        NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifiers,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: characters,
+            isARepeat: false,
+            keyCode: keyCode
+        )!
     }
 
     func testCancellationClearsEnteredValuesBeforeCompleting() throws {
@@ -673,6 +1136,7 @@ final class MacOSInputFormTests: XCTestCase {
             ["release_name", "environment", "services"]
         )
         XCTAssertEqual(form.sendButton.keyEquivalent, "\r")
+        XCTAssertEqual(form.sendButton.keyEquivalentModifierMask, .shift)
         XCTAssertEqual(form.cancelButton.keyEquivalent, "\u{1b}")
 
         form.sendButton.performClick(nil)
@@ -697,6 +1161,15 @@ final class MacOSInputFormTests: XCTestCase {
                 "services": .selection(["api", "web"])
             ])
         )
+    }
+}
+
+@MainActor
+private final class ClickRecordingPopUpButton: KeyKongPopUpButton {
+    private(set) var clickCount = 0
+
+    override func performClick(_ sender: Any?) {
+        clickCount += 1
     }
 }
 

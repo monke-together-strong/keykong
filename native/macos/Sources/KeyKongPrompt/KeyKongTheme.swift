@@ -204,8 +204,22 @@ final class KeyKongFlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
+class KeyKongPopUpButton: NSPopUpButton {
+    override var acceptsFirstResponder: Bool { true }
+
+    override var alignmentRectInsets: NSEdgeInsets {
+        NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+    }
+}
+
+final class KeyKongCheckboxButton: NSButton {
+    override var acceptsFirstResponder: Bool { true }
+}
+
 @MainActor
 class KeyKongPointerButton: NSButton {
+    override var acceptsFirstResponder: Bool { true }
+
     override func resetCursorRects() {
         super.resetCursorRects()
         addCursorRect(bounds, cursor: .pointingHand)

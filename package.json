@@ -13,7 +13,7 @@
     "smoke:ui": "bun run package:macos && bun scripts/run-macos-ui-smoke.ts",
     "test:ui": "bun scripts/test-macos-ui.ts",
     "check": "bunx tsc --noEmit",
-    "test": "bun run build:test && bun test",
+    "test": "bun test",
     "test:swift": "swift test --package-path native/macos"
   },
   "devDependencies": {

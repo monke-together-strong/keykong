@@ -1,10 +1,74 @@
 import AppKit
 
 @MainActor
+final class KeyKongFormWindow: NSWindow {
+    var moveFocus: ((NSControl, Bool) -> Void)?
+    var submit: (() -> Void)?
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown,
+           event.keyCode == 48,
+           event.modifierFlags
+            .intersection([.command, .control, .option])
+            .isEmpty,
+           let focusedControl {
+            moveFocus?(
+                focusedControl,
+                !event.modifierFlags.contains(.shift)
+            )
+            return
+        }
+        super.sendEvent(event)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.type == .keyDown,
+           event.keyCode == 36 || event.keyCode == 76,
+           event.modifierFlags.contains(.shift),
+           event.modifierFlags
+            .intersection([.command, .control, .option])
+            .isEmpty {
+            submit?()
+            return true
+        }
+        if event.type == .keyDown,
+           event.keyCode == 36 || event.keyCode == 76,
+           let focusedControl {
+            if let popUp = focusedControl as? KeyKongPopUpButton {
+                popUp.performClick(nil)
+                return true
+            }
+            if let checkbox = focusedControl as? KeyKongCheckboxButton {
+                checkbox.performClick(nil)
+                return true
+            }
+            if let button = focusedControl as? KeyKongPointerButton {
+                button.performClick(nil)
+                return true
+            }
+            if focusedControl is NSTextField {
+                submit?()
+                return true
+            }
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    private var focusedControl: NSControl? {
+        if let control = firstResponder as? NSControl {
+            return control
+        }
+        return (firstResponder as? NSTextView)?.delegate as? NSControl
+    }
+}
+
+@MainActor
 final class MacOSInputFormController: NSObject, NSWindowDelegate {
     private static let bodySpacing: CGFloat = 18
+    private static let bodyHorizontalInset: CGFloat = 6
+    private static let maximumInitialWindowHeight: CGFloat = 520
 
-    let window: NSWindow
+    let window: KeyKongFormWindow
     let sendButton: NSButton
     let cancelButton: NSButton
     let detailsButton: NSButton
@@ -18,6 +82,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
     private var didComplete = false
     private var collapsedWindowHeight: CGFloat?
     private weak var formScrollView: NSScrollView?
+    private var tabOrder: [NSView] = []
 
     init(
         request: PromptRequest,
@@ -28,7 +93,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         }
         self.request = request
         self.onComplete = onComplete
-        self.window = NSWindow(
+        self.window = KeyKongFormWindow(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 426),
             styleMask: [
                 .titled,
@@ -141,6 +206,12 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
     }
 
     private func configureWindow() {
+        window.moveFocus = { [weak self] control, forward in
+            self?.moveFocus(from: control, forward: forward)
+        }
+        window.submit = { [weak self] in
+            self?.submit()
+        }
         window.title = request.title
         window.collectionBehavior.insert(.moveToActiveSpace)
         window.titleVisibility = .hidden
@@ -158,6 +229,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         sendButton.action = #selector(submit)
         KeyKongTheme.stylePrimaryButton(sendButton)
         sendButton.keyEquivalent = "\r"
+        sendButton.keyEquivalentModifierMask = .shift
         sendButton.identifier = NSUserInterfaceItemIdentifier("send")
         sendButton.toolTip = "Submit these values for delivery"
         sendButton.widthAnchor.constraint(equalToConstant: 116).isActive = true
@@ -321,8 +393,14 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         NSLayoutConstraint.activate([
             documentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
             documentView.heightAnchor.constraint(greaterThanOrEqualTo: scrollView.contentView.heightAnchor),
-            bodyStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
-            bodyStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
+            bodyStack.leadingAnchor.constraint(
+                equalTo: documentView.leadingAnchor,
+                constant: Self.bodyHorizontalInset
+            ),
+            bodyStack.trailingAnchor.constraint(
+                equalTo: documentView.trailingAnchor,
+                constant: -Self.bodyHorizontalInset
+            ),
             bodyStack.topAnchor.constraint(equalTo: documentView.topAnchor),
             bodyStack.bottomAnchor.constraint(lessThanOrEqualTo: documentView.bottomAnchor),
             fieldsStack.widthAnchor.constraint(equalTo: bodyStack.widthAnchor),
@@ -365,11 +443,23 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
             footer.widthAnchor.constraint(equalTo: content.widthAnchor)
         ])
 
-        let detailControls = request.deliveries.isEmpty ? [] : [detailsButton]
-        configureTabOrder(
-            focusableViews + detailControls + [cancelButton, sendButton]
-        )
         window.contentView = root
+        window.autorecalculatesKeyViewLoop = false
+        let detailControls = request.deliveries.isEmpty ? [] : [detailsButton]
+        configureTabOrder(focusableViews + detailControls)
+        root.layoutSubtreeIfNeeded()
+
+        let missingBodyHeight = max(
+            0,
+            bodyStack.fittingSize.height - scrollView.contentView.bounds.height
+        )
+        let availableGrowth = max(
+            0,
+            Self.maximumInitialWindowHeight - window.frame.height
+        )
+        var frame = window.frame
+        frame.size.height += min(missingBodyHeight, availableGrowth)
+        window.setFrame(frame, display: false)
     }
 
     private func makeInput(for field: PromptField) -> NSView {
@@ -385,7 +475,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
             return SecretInputView(label: field.label)
 
         case .select:
-            let popUp = NSPopUpButton()
+            let popUp = KeyKongPopUpButton()
             KeyKongTheme.style(popUp)
             popUp.setAccessibilityLabel(field.label)
             popUp.addItem(withTitle: "Select…")
@@ -399,7 +489,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
 
         case .multiSelect:
             let buttons = (field.options ?? []).map { option in
-                let button = NSButton(
+                let button = KeyKongCheckboxButton(
                     checkboxWithTitle: option.label,
                     target: nil,
                     action: nil
@@ -420,7 +510,10 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
 
     private func focusableControls(in view: NSView) -> [NSView] {
         if let secret = view as? SecretInputView {
-            return [secret.secureTextField, secret.revealButton]
+            return [
+                secret.secureTextField,
+                secret.revealedTextField
+            ]
         }
         if let stack = view as? NSStackView {
             return stack.arrangedSubviews
@@ -429,8 +522,35 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
     }
 
     private func configureTabOrder(_ views: [NSView]) {
+        tabOrder = views
         for (current, next) in zip(views, views.dropFirst()) {
             current.nextKeyView = next
+        }
+        views.last?.nextKeyView = views.first
+    }
+
+    private func moveFocus(from control: NSControl, forward: Bool) {
+        guard tabOrder.count > 1,
+              let currentIndex = tabOrder.firstIndex(where: { $0 === control })
+        else {
+            return
+        }
+
+        for offset in 1..<tabOrder.count {
+            let delta = forward ? offset : -offset
+            let index = (currentIndex + delta + tabOrder.count)
+                % tabOrder.count
+            let destination = tabOrder[index]
+            if destination.isHiddenOrHasHiddenAncestor {
+                continue
+            }
+            if let control = destination as? NSControl, !control.isEnabled {
+                continue
+            }
+            if window.makeFirstResponder(destination) {
+                destination.scrollToVisible(destination.bounds)
+                return
+            }
         }
     }
 
@@ -447,7 +567,9 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         if window.isVisible {
             formScrollView?.hasVerticalScroller = false
         }
-        detailsView.isHidden = !isExpanded
+        if isExpanded {
+            detailsView.isHidden = false
+        }
         detailsButton.image = NSImage(
             systemSymbolName: isExpanded ? "chevron.down" : "chevron.right",
             accessibilityDescription:
@@ -507,6 +629,8 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         if isExpanded {
             detailsView.superview?.layoutSubtreeIfNeeded()
             detailsView.scrollToVisible(detailsView.bounds)
+        } else {
+            detailsView.isHidden = true
         }
     }
 

@@ -37,17 +37,30 @@ const request = {
   id: "ui_test",
   title: "Credentials needed",
   fields: [
-    { id: "github_token", label: "GitHub token", type: "secret" },
     { id: "deploy_token", label: "Deploy token", type: "secret" },
+    { id: "environment", label: "Environment", type: "text" },
+    {
+      id: "region",
+      label: "Region",
+      type: "select",
+      options: [
+        { label: "Oregon", value: "us-west-2" },
+        { label: "Virginia", value: "us-east-1" },
+        { label: "Frankfurt", value: "eu-central-1" },
+      ],
+    },
+    {
+      id: "features",
+      label: "Features",
+      type: "multi_select",
+      options: [
+        { label: "Audit logging", value: "audit" },
+        { label: "Deployment alerts", value: "alerts" },
+        { label: "Preview deployments", value: "previews" },
+      ],
+    },
   ],
   deliveries: [
-    {
-      id: "github_token_env",
-      path: target,
-      operation: "set_env",
-      key: "GITHUB_TOKEN",
-      field: "github_token",
-    },
     {
       id: "deploy_token_env",
       path: target,
