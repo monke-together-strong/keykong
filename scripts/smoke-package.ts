@@ -110,6 +110,17 @@ for (const [target, deep] of [
   if (verification.exitCode !== 0) {
     throw new Error(`invalid signature: ${target}`);
   }
+
+  const signature = Bun.spawnSync(
+    ["/usr/bin/codesign", "--display", "--verbose=4", target],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  if (
+    signature.exitCode !== 0 ||
+    !/^CodeDirectory .* flags=.*\bruntime\b/m.test(signature.stderr.toString())
+  ) {
+    throw new Error(`Hardened Runtime is disabled: ${target}`);
+  }
 }
 
 const version = Bun.spawnSync([cli, "--version"], {
