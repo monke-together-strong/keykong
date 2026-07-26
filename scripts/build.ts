@@ -58,7 +58,7 @@ const artifactFiles = [root, artifactDirectory].flatMap((directory) =>
     )
     .map((entry) => {
       const path = join(directory, entry.name);
-      return { directory, name: entry.name, path, changed: statSync(path).ctimeMs };
+      return { directory, name: entry.name, path, changed: statSync(path).mtimeMs };
     })
 );
 

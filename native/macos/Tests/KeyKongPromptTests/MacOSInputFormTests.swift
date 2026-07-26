@@ -386,7 +386,9 @@ final class MacOSInputFormTests: XCTestCase {
         form.detailsButton.performClick(nil)
 
         XCTAssertEqual(scrollerStates.values.first, false)
-        XCTAssertEqual(scrollerStates.values.last, true)
+        XCTAssertTrue(wait {
+            scrollerStates.values.last == true
+        })
         withExtendedLifetime(observation) {}
         form.window.orderOut(nil)
     }

@@ -1,4 +1,4 @@
-import { chmod, mkdir, open, rm } from "node:fs/promises";
+import { chmod, mkdtemp, open, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,11 +23,10 @@ if (cliArguments.includes("-b")) {
   }
 }
 
-const directory = join(tmpdir(), "keykong-ui-test");
+const directory = await mkdtemp(join(tmpdir(), "keykong-ui-test-"));
 const target = join(directory, "preview.env");
-await mkdir(directory, { recursive: true, mode: 0o700 });
 await chmod(directory, 0o700);
-const targetFile = await open(target, "w", 0o600);
+const targetFile = await open(target, "wx", 0o600);
 try {
   await targetFile.chmod(0o600);
 } finally {
@@ -77,5 +76,5 @@ try {
     throw new Error(`Key Kong exited with status ${exitCode}`);
   }
 } finally {
-  await rm(target, { force: true });
+  await rm(directory, { recursive: true, force: true });
 }

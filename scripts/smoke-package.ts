@@ -131,7 +131,9 @@ const requestSchema = JSON.parse(schema.stdout.toString());
 if (
   schema.exitCode !== 0 ||
   requestSchema.additionalProperties !== false ||
-  !requestSchema.required?.includes("fields")
+  JSON.stringify(requestSchema.required) !==
+    JSON.stringify(["id", "title", "fields"]) ||
+  "schemaVersion" in (requestSchema.properties ?? {})
 ) {
   throw new Error("packaged CLI schema smoke test failed");
 }
