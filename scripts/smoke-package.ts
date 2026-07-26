@@ -1,4 +1,10 @@
-import { readdirSync, readFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
@@ -18,6 +24,8 @@ const expectedLayout = [
   "bin/keykong",
   "libexec/KeyKongPrompt.app/Contents/Info.plist",
   "libexec/KeyKongPrompt.app/Contents/MacOS/keykong-prompt",
+  "libexec/KeyKongPrompt.app/Contents/Resources/KeyKong.icns",
+  "libexec/KeyKongPrompt.app/Contents/Resources/keykong-app-icon-emblem.png",
   "libexec/KeyKongPrompt.app/Contents/_CodeSignature/CodeResources",
 ];
 if (layout.join("\n") !== expectedLayout.join("\n")) {
@@ -39,6 +47,7 @@ const plist = JSON.parse(plistResult.stdout.toString());
 const expectedPlist = {
   CFBundleDisplayName: "KeyKong",
   CFBundleExecutable: "keykong-prompt",
+  CFBundleIconFile: "KeyKong.icns",
   CFBundleIdentifier: "dev.keykong.prompt",
   CFBundleInfoDictionaryVersion: "6.0",
   CFBundleName: "KeyKong",
@@ -55,6 +64,38 @@ for (const [key, value] of Object.entries(expectedPlist)) {
 }
 if ("LSUIElement" in plist || "LSBackgroundOnly" in plist) {
   throw new Error("Prompt Adapter must use regular activation policy");
+}
+
+const icon = join(app, "Contents/Resources/KeyKong.icns");
+const emblem = join(
+  app,
+  "Contents/Resources/keykong-app-icon-emblem.png",
+);
+if (
+  readFileSync(emblem).compare(
+    readFileSync(join(root, "assets/keykong-app-icon-emblem.png")),
+  ) !== 0
+) {
+  throw new Error("packaged Prompt Adapter emblem does not match its source");
+}
+const iconCheckDirectory = mkdtempSync(join(tmpdir(), "keykong-icon-"));
+try {
+  const iconCheck = Bun.spawnSync(
+    [
+      "/usr/bin/iconutil",
+      "-c",
+      "iconset",
+      "-o",
+      join(iconCheckDirectory, "KeyKong.iconset"),
+      icon,
+    ],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  if (iconCheck.exitCode !== 0) {
+    throw new Error("packaged Prompt Adapter icon is invalid");
+  }
+} finally {
+  rmSync(iconCheckDirectory, { recursive: true, force: true });
 }
 
 for (const [target, deep] of [

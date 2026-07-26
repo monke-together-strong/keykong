@@ -18,6 +18,212 @@ final class MacOSInputFormTests: XCTestCase {
         XCTAssertEqual(form.window.level, .normal)
     }
 
+    func testThemedHeaderAndFooterControlsStayCentered() throws {
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Alignment",
+                fields: [
+                    PromptField(id: "token", label: "Token", type: .secret)
+                ]
+            )
+        ) { _ in }
+        let root = try XCTUnwrap(form.window.contentView)
+        root.layoutSubtreeIfNeeded()
+        let emblem = try XCTUnwrap(
+            descendant("emblem", in: root)
+        )
+        let heading = try XCTUnwrap(
+            descendant("heading", in: root)
+        )
+        let reassurance = try XCTUnwrap(
+            descendant("reassurance", in: root)
+        )
+        let emblemFrame = emblem.convert(emblem.bounds, to: root)
+        let textFrame = heading.convert(heading.bounds, to: root).union(
+            reassurance.convert(reassurance.bounds, to: root)
+        )
+        let cancelFrame = form.cancelButton.convert(
+            form.cancelButton.bounds,
+            to: root
+        )
+        let sendFrame = form.sendButton.convert(
+            form.sendButton.bounds,
+            to: root
+        )
+
+        XCTAssertEqual(emblemFrame.midY, textFrame.midY, accuracy: 0.5)
+        XCTAssertEqual(emblemFrame.width, 88, accuracy: 0.5)
+        XCTAssertGreaterThan(textFrame.height, 40)
+        XCTAssertEqual(cancelFrame.midY, sendFrame.midY, accuracy: 0.5)
+        XCTAssertEqual(cancelFrame.height, sendFrame.height, accuracy: 0.5)
+        XCTAssertTrue(KeyKongPointerCursor.isInstalled(on: form.detailsButton))
+        XCTAssertTrue(
+            KeyKongPointerCursor.isInstalled(
+                on: try XCTUnwrap(
+                    form.window.standardWindowButton(.closeButton)
+                )
+            )
+        )
+    }
+
+    func testTextAndSecureCellsCenterTheirDrawingRectsVertically() throws {
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Field alignment",
+                fields: [
+                    PromptField(id: "name", label: "Name", type: .text),
+                    PromptField(id: "token", label: "Token", type: .secret)
+                ]
+            )
+        ) { _ in }
+        let textField = try XCTUnwrap(
+            form.inputViews[0] as? NSTextField
+        )
+        let secret = try XCTUnwrap(
+            form.inputViews[1] as? SecretInputView
+        )
+        let bounds = NSRect(x: 0, y: 0, width: 300, height: 36)
+
+        for field in [
+            textField,
+            secret.secureTextField,
+            secret.revealedTextField
+        ] {
+            let drawingRect = try XCTUnwrap(field.cell)
+                .drawingRect(forBounds: bounds)
+            XCTAssertEqual(drawingRect.midY, bounds.midY, accuracy: 0.5)
+            XCTAssertTrue(field.isEditable)
+            XCTAssertTrue(field.isSelectable)
+            XCTAssertTrue(field.acceptsFirstResponder)
+            XCTAssertNil(field.placeholderString)
+        }
+        XCTAssertTrue(
+            secret.secureTextField.cell is KeyKongSecureTextFieldCell
+        )
+        XCTAssertEqual(textField.accessibilityLabel(), "Name")
+        XCTAssertEqual(secret.secureTextField.accessibilityLabel(), "Token")
+        XCTAssertEqual(secret.revealedTextField.accessibilityLabel(), "Token")
+    }
+
+    func testLongFormsStartAtTheTopWithUniformInputHeights() throws {
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Long form",
+                fields: [
+                    PromptField(id: "name", label: "Name", type: .text),
+                    PromptField(id: "token", label: "Token", type: .secret),
+                    PromptField(
+                        id: "environment",
+                        label: "Environment",
+                        type: .select,
+                        options: [
+                            PromptOption(label: "Production", value: "production")
+                        ]
+                    ),
+                    PromptField(
+                        id: "services",
+                        label: "Services",
+                        type: .multiSelect,
+                        options: [
+                            PromptOption(label: "API", value: "api"),
+                            PromptOption(label: "Web", value: "web")
+                        ]
+                    )
+                ]
+            )
+        ) { _ in }
+        let root = try XCTUnwrap(form.window.contentView)
+        root.layoutSubtreeIfNeeded()
+        let scrollView = try XCTUnwrap(
+            descendant("form-scroll", in: root) as? NSScrollView
+        )
+        let documentView = try XCTUnwrap(scrollView.documentView)
+
+        XCTAssertTrue(documentView.isFlipped)
+        XCTAssertEqual(scrollView.contentView.bounds.minY, 0, accuracy: 0.5)
+        for view in form.inputViews.prefix(3) {
+            XCTAssertEqual(view.frame.height, 36, accuracy: 0.5)
+        }
+    }
+
+    func testExpandedDetailsScrollFullyIntoView() throws {
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Details",
+                fields: [
+                    PromptField(id: "one", label: "One", type: .text),
+                    PromptField(id: "two", label: "Two", type: .text),
+                    PromptField(id: "three", label: "Three", type: .text),
+                    PromptField(id: "four", label: "Four", type: .text)
+                ],
+                deliveries: [
+                    PromptDelivery(path: "/tmp/one", operation: .append),
+                    PromptDelivery(path: "/tmp/two", operation: .append)
+                ]
+            )
+        ) { _ in }
+        let root = try XCTUnwrap(form.window.contentView)
+        root.layoutSubtreeIfNeeded()
+        let scrollView = try XCTUnwrap(
+            descendant("form-scroll", in: root) as? NSScrollView
+        )
+
+        form.detailsButton.performClick(nil)
+
+        XCTAssertFalse(form.detailsView.isHidden)
+        XCTAssertTrue(wait {
+            root.layoutSubtreeIfNeeded()
+            let detailsFrame = form.detailsView.convert(
+                form.detailsView.bounds,
+                to: scrollView.contentView
+            )
+            return scrollView.contentView.bounds.contains(detailsFrame)
+        })
+    }
+
+    func testValidationScrollsTheFirstInvalidFieldIntoView() throws {
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Validation",
+                fields: [
+                    PromptField(id: "one", label: "One", type: .text),
+                    PromptField(id: "two", label: "Two", type: .text),
+                    PromptField(id: "three", label: "Three", type: .text),
+                    PromptField(id: "four", label: "Four", type: .text)
+                ],
+                deliveries: [
+                    PromptDelivery(path: "/tmp/one", operation: .append),
+                    PromptDelivery(path: "/tmp/two", operation: .append)
+                ]
+            )
+        ) { _ in }
+        let root = try XCTUnwrap(form.window.contentView)
+        root.layoutSubtreeIfNeeded()
+        let scrollView = try XCTUnwrap(
+            descendant("form-scroll", in: root) as? NSScrollView
+        )
+        form.detailsButton.performClick(nil)
+        XCTAssertTrue(wait {
+            scrollView.contentView.bounds.maxY
+                >= form.detailsView.convert(
+                    form.detailsView.bounds,
+                    to: scrollView.contentView
+                ).maxY
+        })
+
+        form.sendButton.performClick(nil)
+
+        let firstInput = form.inputViews[0]
+        XCTAssertTrue(wait {
+            root.layoutSubtreeIfNeeded()
+            let inputFrame = firstInput.convert(
+                firstInput.bounds,
+                to: scrollView.contentView
+            )
+            return scrollView.contentView.bounds.intersects(inputFrame)
+        })
+    }
+
     func testReactivationRestoresTheExistingPromptWindow() {
         let form = MacOSInputFormController(
             request: PromptRequest(
@@ -62,6 +268,18 @@ final class MacOSInputFormTests: XCTestCase {
             )
         } while Date() < deadline
         return condition()
+    }
+
+    private func descendant(
+        _ identifier: String,
+        in view: NSView
+    ) -> NSView? {
+        if view.identifier?.rawValue == identifier {
+            return view
+        }
+        return view.subviews.lazy.compactMap {
+            self.descendant(identifier, in: $0)
+        }.first
     }
 
     func testCancellationClearsEnteredValuesBeforeCompleting() throws {
@@ -127,6 +345,8 @@ final class MacOSInputFormTests: XCTestCase {
         }
 
         let secretInput = try XCTUnwrap(form.inputViews.first as? SecretInputView)
+        XCTAssertTrue(secretInput.revealButton is KeyKongPointerButton)
+        let concealedIconSize = try XCTUnwrap(secretInput.revealButton.image).size
         XCTAssertFalse(secretInput.secureTextField.isHidden)
         XCTAssertTrue(secretInput.revealedTextField.isHidden)
         secretInput.secureTextField.stringValue = "highly-secret"
@@ -136,6 +356,7 @@ final class MacOSInputFormTests: XCTestCase {
         XCTAssertTrue(secretInput.secureTextField.isHidden)
         XCTAssertFalse(secretInput.revealedTextField.isHidden)
         XCTAssertEqual(secretInput.revealedTextField.stringValue, "highly-secret")
+        XCTAssertEqual(secretInput.revealButton.image?.size, concealedIconSize)
         secretInput.revealButton.performClick(nil)
         XCTAssertFalse(secretInput.secureTextField.isHidden)
         XCTAssertTrue(secretInput.revealedTextField.isHidden)

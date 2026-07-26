@@ -34,8 +34,11 @@ is:
 dist/libexec/KeyKongPrompt.app/
 └── Contents/
     ├── Info.plist
-    └── MacOS/
-        └── keykong-prompt
+    ├── MacOS/
+    │   └── keykong-prompt
+    └── Resources/
+        ├── KeyKong.icns
+        └── keykong-app-icon-emblem.png
 ```
 
 The bundle is not installed in `/Applications`; Bun launches its nested
