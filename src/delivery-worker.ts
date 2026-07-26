@@ -41,7 +41,7 @@ async function execute(
   delivery: Delivery,
   values: Record<string, ResponseValue>,
   expected: TargetIdentity,
-  protectedKeys?: ReadonlySet<string>,
+  protectedValues?: ReadonlyMap<string, string>,
 ) {
   const { handle, identity } = await openTarget(delivery.path);
   try {
@@ -52,7 +52,7 @@ async function execute(
     const content = await handle.readFile();
     const result = prepareContent(delivery, content, values);
     if (!result) throw new Error("line outside target");
-    if (protectedKeys) validateEnvironmentContent(result, protectedKeys);
+    if (protectedValues) validateEnvironmentContent(result, protectedValues);
 
     let offset = 0;
     while (offset < result.length) {
@@ -92,14 +92,14 @@ self.onmessage = async (event: MessageEvent<DeliveryWorkerRequest>) => {
       ]),
     );
     const failed: string[] = [];
-    const environmentTargets = new Map<string, Set<string>>();
+    const environmentTargets = new Map<string, Map<string, string>>();
     for (const delivery of event.data.deliveries) {
       const target = targets.get(delivery.id)!;
       const targetKey = `${target.dev}:${target.ino}`;
-      const protectedKeys = environmentTargets.get(targetKey);
+      const protectedValues = environmentTargets.get(targetKey);
       if (
         delivery.operation === "set_env" &&
-        protectedKeys?.has(delivery.key)
+        protectedValues?.has(delivery.key)
       ) {
         failed.push(delivery.id);
         continue;
@@ -109,12 +109,15 @@ self.onmessage = async (event: MessageEvent<DeliveryWorkerRequest>) => {
           delivery,
           event.data.values,
           target,
-          protectedKeys,
+          protectedValues,
         );
         if (delivery.operation === "set_env") {
-          const keys = protectedKeys ?? new Set<string>();
-          keys.add(delivery.key);
-          environmentTargets.set(targetKey, keys);
+          const targetValues = protectedValues ?? new Map<string, string>();
+          targetValues.set(
+            delivery.key,
+            event.data.values[delivery.field] as string,
+          );
+          environmentTargets.set(targetKey, targetValues);
         }
       } catch {
         failed.push(delivery.id);

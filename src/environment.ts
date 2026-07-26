@@ -102,7 +102,7 @@ function validateTarget(
 function activeAssignments(
   lines: PhysicalLine[],
   key: string,
-): Array<{ index: number; prefix: string }> {
+): Array<{ index: number; prefix: string; rightHandSide: string }> {
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const active = new RegExp(
     `^(${prefixPattern}${escapedKey}[\\t ]*=)(.*)$`,
@@ -111,7 +111,9 @@ function activeAssignments(
   return lines.flatMap(({ body }, index) => {
     if (trimHorizontalStart(body).startsWith("#")) return [];
     const match = active.exec(body);
-    return match ? [{ index, prefix: match[1]! }] : [];
+    return match
+      ? [{ index, prefix: match[1]!, rightHandSide: match[2]! }]
+      : [];
   });
 }
 
@@ -139,12 +141,16 @@ function serialize(value: string): string {
 
 export function validateEnvironmentContent(
   content: Buffer,
-  protectedKeys: ReadonlySet<string>,
+  protectedValues: ReadonlyMap<string, string>,
 ): void {
   const lines = decodeLines(content);
   validateTarget(lines, undefined, false);
-  for (const key of protectedKeys) {
-    if (activeAssignments(lines, key).length !== 1) {
+  for (const [key, value] of protectedValues) {
+    const matches = activeAssignments(lines, key);
+    if (
+      matches.length !== 1 ||
+      matches[0]!.rightHandSide !== serialize(value)
+    ) {
       throw new Error("protected assignment changed");
     }
   }

@@ -1087,6 +1087,38 @@ describe("built CLI response request", () => {
     expect(await readFile(duplicateTarget, "utf8")).toBe(
       'FIRST="highly-secret"\n',
     );
+
+    const joinedTarget = join(directory, "set-env-before-joined-append.env");
+    await writeFile(joinedTarget, "FIRST=old");
+    const joinedInput = withDeliveries(joinedTarget, [
+      {
+        id: "first",
+        path: joinedTarget,
+        operation: "set_env",
+        key: "FIRST",
+        field: "api_token",
+      },
+      {
+        id: "second",
+        path: joinedTarget,
+        operation: "append",
+        template: "OTHER={{ environment }}\n",
+      },
+    ]);
+    const joinedSecret = 'both"quotes\'stay';
+
+    const joinedResult = run(["request", "-"], {
+      stdin: joinedInput,
+      secret: joinedSecret,
+    });
+
+    expect(joinedResult.code).toBe(1);
+    expect(JSON.parse(joinedResult.stdout).failedDeliveries).toEqual([
+      "second",
+    ]);
+    expect(await readFile(joinedTarget, "utf8")).toBe(
+      `FIRST=${joinedSecret}`,
+    );
   });
 
   test("ordered append and insert deliveries affect the same target", async () => {
