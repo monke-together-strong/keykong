@@ -7,6 +7,7 @@ import {
 } from "node:fs";
 import {
   chmod,
+  link,
   mkdir,
   mkdtemp,
   readFile,
@@ -880,6 +881,71 @@ describe("built CLI response request", () => {
     const content = await readFile(target, "utf8");
     expect(content).toBe(`FIRST=${secret}\n`);
     expect(parseWithNode(content).FIRST).toBe(secret);
+  });
+
+  test("a later template delivery cannot invalidate set_env", async () => {
+    const secret = '"abc\'#hash';
+    for (const operation of ["append", "insert_line"] as const) {
+      const target = join(directory, `set-env-before-${operation}.env`);
+      await writeFile(target, "");
+      const input = withDeliveries(target, [
+        {
+          id: "first",
+          path: target,
+          operation: "set_env",
+          key: "FIRST",
+          field: "api_token",
+        },
+        {
+          id: "second",
+          path: target,
+          operation,
+          ...(operation === "insert_line" ? { line: 2 } : {}),
+          template: '# "{{ environment }}"\n',
+        },
+      ]);
+
+      const result = run(["request", "-"], {
+        stdin: input,
+        secret,
+      });
+
+      expect(result.code).toBe(1);
+      expect(JSON.parse(result.stdout).failedDeliveries).toEqual(["second"]);
+      expect(result.stdout + result.stderr).not.toContain(secret);
+      const content = await readFile(target, "utf8");
+      expect(content).toBe(`FIRST=${secret}\n`);
+      expect(parseWithNode(content).FIRST).toBe(secret);
+    }
+
+    const target = join(directory, "set-env-before-hardlink.env");
+    const alias = join(directory, "set-env-before-hardlink-alias.env");
+    await writeFile(target, "");
+    await link(target, alias);
+    const input = withDeliveries(target, [
+      {
+        id: "first",
+        path: target,
+        operation: "set_env",
+        key: "FIRST",
+        field: "api_token",
+      },
+      {
+        id: "second",
+        path: alias,
+        operation: "append",
+        template: '# "{{ environment }}"\n',
+      },
+    ]);
+
+    const result = run(["request", "-"], {
+      stdin: input,
+      secret,
+    });
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout).failedDeliveries).toEqual(["second"]);
+    expect(await readFile(target, "utf8")).toBe(`FIRST=${secret}\n`);
   });
 
   test("ordered append and insert deliveries affect the same target", async () => {

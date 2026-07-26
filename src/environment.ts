@@ -43,6 +43,14 @@ function physicalLines(text: string): PhysicalLine[] {
   return lines;
 }
 
+function decodeLines(content: Buffer): PhysicalLine[] {
+  const text = new TextDecoder("utf-8", {
+    fatal: true,
+    ignoreBOM: true,
+  }).decode(content);
+  return physicalLines(text);
+}
+
 function validateTarget(
   lines: PhysicalLine[],
   replacedIndex?: number,
@@ -109,16 +117,16 @@ function serialize(value: string): string {
   throw new Error("value cannot be represented losslessly");
 }
 
+export function validateEnvironmentContent(content: Buffer): void {
+  validateTarget(decodeLines(content));
+}
+
 export function setEnvironmentAssignment(
   content: Buffer,
   key: string,
   value: string,
 ): Buffer {
-  const text = new TextDecoder("utf-8", {
-    fatal: true,
-    ignoreBOM: true,
-  }).decode(content);
-  const lines = physicalLines(text);
+  const lines = decodeLines(content);
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const active = new RegExp(
     `^(${prefixPattern}${escapedKey}[\\t ]*=)(.*)$`,

@@ -1,5 +1,8 @@
 import { insertBeforeLine } from "./content";
-import { setEnvironmentAssignment } from "./environment";
+import {
+  setEnvironmentAssignment,
+  validateEnvironmentContent,
+} from "./environment";
 import { renderTemplate } from "./template";
 import { openTarget, type TargetIdentity } from "./target";
 import type {
@@ -38,6 +41,7 @@ async function execute(
   delivery: Delivery,
   values: Record<string, ResponseValue>,
   expected: TargetIdentity,
+  validateEnvironment: boolean,
 ) {
   const { handle, identity } = await openTarget(delivery.path);
   try {
@@ -48,6 +52,7 @@ async function execute(
     const content = await handle.readFile();
     const result = prepareContent(delivery, content, values);
     if (!result) throw new Error("line outside target");
+    if (validateEnvironment) validateEnvironmentContent(result);
 
     let offset = 0;
     while (offset < result.length) {
@@ -87,13 +92,20 @@ self.onmessage = async (event: MessageEvent<DeliveryWorkerRequest>) => {
       ]),
     );
     const failed: string[] = [];
+    const environmentTargets = new Set<string>();
     for (const delivery of event.data.deliveries) {
+      const target = targets.get(delivery.id)!;
+      const targetKey = `${target.dev}:${target.ino}`;
       try {
         await execute(
           delivery,
           event.data.values,
-          targets.get(delivery.id)!,
+          target,
+          environmentTargets.has(targetKey),
         );
+        if (delivery.operation === "set_env") {
+          environmentTargets.add(targetKey);
+        }
       } catch {
         failed.push(delivery.id);
       }
