@@ -392,13 +392,13 @@ try expectValueLength(
 setClipboard(clipboardGuard, on: pasteboard)
 postKey(Key.a, modifiers: .maskCommand, to: process.processIdentifier)
 postKey(Key.c, modifiers: .maskCommand, to: process.processIdentifier)
-RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+RunLoop.current.run(until: Date().addingTimeInterval(0.5))
 guard pasteboard.string(forType: .string) == clipboardGuard else {
     try fail("Copy exposed the packaged secure field")
 }
 
 postKey(Key.x, modifiers: .maskCommand, to: process.processIdentifier)
-RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+RunLoop.current.run(until: Date().addingTimeInterval(0.5))
 guard pasteboard.string(forType: .string) == clipboardGuard,
       value(of: secureField)?.count == secureReplacement.count else {
     try fail("Cut exposed or removed the packaged secure field")

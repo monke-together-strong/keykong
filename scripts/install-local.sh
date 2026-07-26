@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-root_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+root_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 install_bin="${HOME:?}/.local/bin"
 install_libexec="${HOME:?}/.local/libexec"
 target_cli="$install_bin/keykong"
@@ -25,7 +25,6 @@ chmod +x "$staging_dir/keykong"
 
 rm -rf -- "$target_app"
 mv "$staging_dir/KeyKongPrompt.app" "$target_app"
-cp "$staging_dir/keykong" "$target_cli"
-chmod +x "$target_cli"
+mv "$staging_dir/keykong" "$target_cli"
 
 printf 'Installed keykong to %s\n' "$target_cli"
