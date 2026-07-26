@@ -19,12 +19,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
-const cli = join(root, "dist/bin/key-kong");
+const cli = join(root, "dist/bin/keykong");
 const fakePrompt = join(root, "test/fake-prompt.ts");
 let directory: string;
 
 beforeAll(async () => {
-  directory = await mkdtemp(join(tmpdir(), "key-kong-"));
+  directory = await mkdtemp(join(tmpdir(), "keykong-"));
   await chmod(fakePrompt, 0o700);
 });
 
@@ -190,7 +190,7 @@ describe("built CLI response request", () => {
 
     expect(result.code).toBe(2);
     expect(result.stdout).toBe(
-      '{"status":"failed","values":{},"error":{"code":"CLI_USAGE","message":"usage: key-kong request <file|->"}}\n',
+      '{"status":"failed","values":{},"error":{"code":"CLI_USAGE","message":"usage: keykong request <file|->"}}\n',
     );
   });
 
@@ -238,8 +238,8 @@ describe("built CLI response request", () => {
     expect(schema.properties.fields.maxItems).toBe(256);
     expect(schema.properties.deliveries.maxItems).toBe(256);
     expect(schema.$defs.field.properties.options.maxItems).toBe(256);
-    expect(run(["--help"]).stdout).toContain("key-kong request <file|->");
-    expect(run(["--version"]).stdout).toBe("key-kong 1.0.0\n");
+    expect(run(["--help"]).stdout).toContain("keykong request <file|->");
+    expect(run(["--version"]).stdout).toBe("keykong 1.0.0\n");
   });
 
   test("explicit standard input completes all response field kinds", () => {
@@ -1554,10 +1554,10 @@ describe("built CLI response request", () => {
     const layout = join(directory, "production");
     const bin = join(layout, "bin");
     const libexec = join(layout, "libexec");
-    const productionCLI = join(bin, "key-kong");
+    const productionCLI = join(bin, "keykong");
     const bundledHelper = join(
       libexec,
-      "KeyKongPrompt.app/Contents/MacOS/key-kong-prompt",
+      "KeyKongPrompt.app/Contents/MacOS/keykong-prompt",
     );
     const overrideHelper = join(layout, "override-prompt");
     await mkdir(bin, { recursive: true });

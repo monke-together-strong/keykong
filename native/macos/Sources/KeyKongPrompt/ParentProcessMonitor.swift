@@ -10,7 +10,7 @@ public final class ParentProcessMonitor {
     ) {
         guard processID > 1 else { return nil }
         let queue = DispatchQueue(
-            label: "dev.key-kong.parent-process-monitor"
+            label: "dev.keykong.parent-process-monitor"
         )
         source = DispatchSource.makeProcessSource(
             identifier: processID,

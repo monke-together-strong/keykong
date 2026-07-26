@@ -8,7 +8,7 @@ outcomes and non-secret response values to the caller. This keeps secrets out
 of model context, logs, and tool responses.
 
 The shipped macOS architecture is one Bun package and one Swift package. Bun
-provides the sole public `key-kong` executable; Swift provides only the private,
+provides the sole public `keykong` executable; Swift provides only the private,
 one-shot AppKit Prompt Adapter packaged as an application bundle.
 
 ## Build and run
@@ -27,7 +27,7 @@ Build and sign the self-contained macOS layout in `dist/`:
 bun run package:macos
 ```
 
-The public Bun executable is `dist/bin/key-kong`. Its compatible private helper
+The public Bun executable is `dist/bin/keykong`. Its compatible private helper
 is:
 
 ```text
@@ -35,7 +35,7 @@ dist/libexec/KeyKongPrompt.app/
 └── Contents/
     ├── Info.plist
     └── MacOS/
-        └── key-kong-prompt
+        └── keykong-prompt
 ```
 
 The bundle is not installed in `/Applications`; Bun launches its nested
@@ -47,18 +47,30 @@ CLI separately, and strictly verifies all three.
 Submit a versioned JSON request from a file or explicit standard input:
 
 ```sh
-dist/bin/key-kong request request.json
-producer | dist/bin/key-kong request -
+dist/bin/keykong request request.json
+producer | dist/bin/keykong request -
 ```
 
 The CLI also provides `schema`, `--help`, and `--version`. Requests require
 `schemaVersion: 1`, and the `request` command writes exactly one
 newline-terminated JSON result to standard output.
 
-See [the request schema](docs/request-schema.md) for the versioned contract.
+Run `keykong schema` for the authoritative machine-readable contract. See the
+[Key Kong skill](skills/keykong/SKILL.md) for concise agent usage.
 The Bun path supports required text, secret, single-select, and multi-select
 fields plus ordered append, insert-before-line, and key-aware `set_env`
 deliveries to existing absolute-path files.
+
+## Local install
+
+```sh
+bun run install:local
+keykong --version
+```
+
+This rebuilds and signs the macOS package, installs `keykong` to
+`~/.local/bin`, and installs its private Prompt Adapter to
+`~/.local/libexec/KeyKongPrompt.app`.
 
 ## Architecture
 

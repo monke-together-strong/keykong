@@ -11,7 +11,7 @@ function helperPath(): string {
   }
   return resolve(
     dirname(process.execPath),
-    "../libexec/KeyKongPrompt.app/Contents/MacOS/key-kong-prompt",
+    "../libexec/KeyKongPrompt.app/Contents/MacOS/keykong-prompt",
   );
 }
 

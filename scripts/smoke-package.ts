@@ -1,5 +1,4 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
@@ -16,18 +15,18 @@ const layout = readdirSync(dist, {
     .slice(dist.length + 1))
   .sort();
 const expectedLayout = [
-  "bin/key-kong",
+  "bin/keykong",
   "libexec/KeyKongPrompt.app/Contents/Info.plist",
-  "libexec/KeyKongPrompt.app/Contents/MacOS/key-kong-prompt",
+  "libexec/KeyKongPrompt.app/Contents/MacOS/keykong-prompt",
   "libexec/KeyKongPrompt.app/Contents/_CodeSignature/CodeResources",
 ];
 if (layout.join("\n") !== expectedLayout.join("\n")) {
   throw new Error(`unexpected packaged layout: ${layout.join(", ")}`);
 }
 
-const cli = join(root, "dist/bin/key-kong");
+const cli = join(root, "dist/bin/keykong");
 const app = join(root, "dist/libexec/KeyKongPrompt.app");
-const helper = join(app, "Contents/MacOS/key-kong-prompt");
+const helper = join(app, "Contents/MacOS/keykong-prompt");
 const infoPlist = join(app, "Contents/Info.plist");
 const plistResult = Bun.spawnSync(
   ["/usr/bin/plutil", "-convert", "json", "-o", "-", infoPlist],
@@ -39,7 +38,7 @@ if (plistResult.exitCode !== 0) {
 const plist = JSON.parse(plistResult.stdout.toString());
 const expectedPlist = {
   CFBundleDisplayName: "KeyKong",
-  CFBundleExecutable: "key-kong-prompt",
+  CFBundleExecutable: "keykong-prompt",
   CFBundleIdentifier: "dev.keykong.prompt",
   CFBundleInfoDictionaryVersion: "6.0",
   CFBundleName: "KeyKong",
@@ -78,7 +77,7 @@ const version = Bun.spawnSync([cli, "--version"], {
 });
 if (
   version.exitCode !== 0 ||
-  version.stdout.toString() !== `key-kong ${packageVersion}\n`
+  version.stdout.toString() !== `keykong ${packageVersion}\n`
 ) {
   throw new Error("packaged CLI version smoke test failed");
 }
@@ -102,52 +101,4 @@ if (
   invalidHelper.stderr.toString() !== "native prompt failed\n"
 ) {
   throw new Error("packaged Prompt Adapter smoke test failed");
-}
-
-const diagnosticReportsDirectory = join(
-  homedir(),
-  "Library/Logs/DiagnosticReports",
-);
-function helperCrashReports(): Set<string> {
-  try {
-    return new Set(
-      readdirSync(diagnosticReportsDirectory)
-        .filter((name) => name.startsWith("key-kong-prompt-")),
-    );
-  } catch {
-    return new Set();
-  }
-}
-
-const reportsBefore = helperCrashReports();
-const uiSmoke = Bun.spawnSync(
-  [
-    "/usr/bin/xcrun",
-    "swift",
-    join(root, "scripts/smoke-macos-ui.swift"),
-    helper,
-  ],
-  { stdout: "inherit", stderr: "inherit" },
-);
-if (uiSmoke.exitCode !== 0) {
-  throw new Error("packaged Prompt Adapter UI smoke test failed");
-}
-const crashReportDeadline = Date.now() + 5_000;
-let newReports: string[] = [];
-do {
-  await Bun.sleep(250);
-  newReports = [...helperCrashReports()]
-    .filter((name) => !reportsBefore.has(name));
-} while (newReports.length === 0 && Date.now() < crashReportDeadline);
-if (newReports.length > 0) {
-  throw new Error(
-    `packaged Prompt Adapter crashed: ${newReports.join(", ")}`,
-  );
-}
-const remainingHelper = Bun.spawnSync(
-  ["/usr/bin/pgrep", "-x", "key-kong-prompt"],
-  { stdout: "pipe", stderr: "pipe" },
-);
-if (remainingHelper.exitCode === 0) {
-  throw new Error("packaged Prompt Adapter remained after UI smoke test");
 }

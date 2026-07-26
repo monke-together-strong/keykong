@@ -27,7 +27,7 @@ public enum PromptRunner {
         return outcome
     }
 
-    private static func makeMainMenu() -> NSMenu {
+    static func makeMainMenu() -> NSMenu {
         let mainMenu = NSMenu()
         let editMenu = NSMenu(title: "Edit")
         let editItem = NSMenuItem(
@@ -39,9 +39,46 @@ public enum PromptRunner {
         mainMenu.addItem(editItem)
         editMenu.addItem(
             NSMenuItem(
+                title: "Undo",
+                action: Selector(("undo:")),
+                keyEquivalent: "z"
+            )
+        )
+        let redoItem = NSMenuItem(
+            title: "Redo",
+            action: Selector(("redo:")),
+            keyEquivalent: "z"
+        )
+        redoItem.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(redoItem)
+        editMenu.addItem(.separator())
+        editMenu.addItem(
+            NSMenuItem(
+                title: "Cut",
+                action: #selector(NSText.cut(_:)),
+                keyEquivalent: "x"
+            )
+        )
+        editMenu.addItem(
+            NSMenuItem(
+                title: "Copy",
+                action: #selector(NSText.copy(_:)),
+                keyEquivalent: "c"
+            )
+        )
+        editMenu.addItem(
+            NSMenuItem(
                 title: "Paste",
                 action: #selector(NSText.paste(_:)),
                 keyEquivalent: "v"
+            )
+        )
+        editMenu.addItem(.separator())
+        editMenu.addItem(
+            NSMenuItem(
+                title: "Select All",
+                action: #selector(NSResponder.selectAll(_:)),
+                keyEquivalent: "a"
             )
         )
         return mainMenu

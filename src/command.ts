@@ -14,7 +14,7 @@ export interface Execution {
 }
 
 function usage(): never {
-  throw new KeyKongError("CLI_USAGE", "usage: key-kong request <file|->", 2);
+  throw new KeyKongError("CLI_USAGE", "usage: keykong request <file|->", 2);
 }
 
 async function readRequest(source: string, deadline: Deadline): Promise<string> {
