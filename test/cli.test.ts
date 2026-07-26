@@ -438,6 +438,11 @@ describe("built CLI response request", () => {
         after: 'API_TOKEN="highly-secret"\n# stop\nOTHER=one\n',
       },
       {
+        name: "unrelated-whitespace-at-eof",
+        before: "API_TOKEN=old\nOTHER= ",
+        after: 'API_TOKEN="highly-secret"\nOTHER= ',
+      },
+      {
         name: "double-quoted",
         before: 'API_TOKEN="old value"\n',
         after: 'API_TOKEN="highly-secret"\n',
@@ -583,6 +588,10 @@ describe("built CLI response request", () => {
       {
         name: "target-cross-line-whitespace-assignment",
         content: "API_TOKEN= \nOTHER=one\n",
+      },
+      {
+        name: "whitespace-before-appended-target",
+        content: "OTHER= ",
       },
       {
         name: "empty-key-prefixed-assignment",
@@ -854,6 +863,36 @@ describe("built CLI response request", () => {
     expect(result.code).toBe(0);
     expect(await readFile(target, "utf8")).toBe(
       'ENVIRONMENT="prod"\n# us-west-2\nAPI_TOKEN="highly-secret"\n',
+    );
+
+    const hardlinkTarget = join(directory, "set-env-ordered-hardlink.env");
+    const alias = join(directory, "set-env-ordered-hardlink-alias.env");
+    await writeFile(hardlinkTarget, "");
+    await createHardLink(hardlinkTarget, alias);
+    const hardlinkInput = withDeliveries(hardlinkTarget, [
+      {
+        id: "environment",
+        path: hardlinkTarget,
+        operation: "set_env",
+        key: "API_TOKEN",
+        field: "api_token",
+      },
+      {
+        id: "comment",
+        path: alias,
+        operation: "insert_line",
+        line: 2,
+        template: "# {{ region }}",
+      },
+    ]);
+
+    const hardlinkResult = run(["request", "-"], {
+      stdin: hardlinkInput,
+    });
+
+    expect(hardlinkResult.code).toBe(0);
+    expect(await readFile(hardlinkTarget, "utf8")).toBe(
+      'API_TOKEN="highly-secret"\n# us-west-2\n',
     );
   });
 

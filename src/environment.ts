@@ -16,12 +16,16 @@ function trimHorizontalStart(value: string): string {
   return value.replace(/^[\t ]*/, "");
 }
 
-function consumesFollowingLine(lines: PhysicalLine[], index: number): boolean {
+function consumesFollowingLine(
+  lines: PhysicalLine[],
+  index: number,
+  appending: boolean,
+): boolean {
   const next = lines
     .slice(index + 1)
     .map(({ body }) => trimHorizontalStart(body))
     .find((body) => body !== "");
-  return next !== undefined && !next.startsWith("#");
+  return next === undefined ? appending : !next.startsWith("#");
 }
 
 function physicalLines(text: string): PhysicalLine[] {
@@ -56,6 +60,7 @@ function decodeLines(content: Buffer): PhysicalLine[] {
 function validateTarget(
   lines: PhysicalLine[],
   replacedIndex?: number,
+  appending = replacedIndex === undefined,
 ): "\n" | "\r\n" {
   const endings = new Set(
     lines.flatMap(({ ending }) => ending === "" ? [] : [ending]),
@@ -74,10 +79,7 @@ function validateTarget(
       rawRightHandSide !== "" &&
       rawRightHandSide !== undefined &&
       /^[\t ]+$/.test(rawRightHandSide) &&
-      (
-        index !== replacedIndex ||
-        consumesFollowingLine(lines, index)
-      )
+      consumesFollowingLine(lines, index, appending)
     ) {
       throw new Error("cross-line whitespace assignment");
     }
@@ -140,7 +142,7 @@ export function validateEnvironmentContent(
   protectedKeys: ReadonlySet<string>,
 ): void {
   const lines = decodeLines(content);
-  validateTarget(lines);
+  validateTarget(lines, undefined, false);
   for (const key of protectedKeys) {
     if (activeAssignments(lines, key).length !== 1) {
       throw new Error("protected assignment changed");
@@ -156,7 +158,11 @@ export function setEnvironmentAssignment(
   const lines = decodeLines(content);
   const matches = activeAssignments(lines, key);
   if (matches.length > 1) throw new Error("duplicate active key");
-  const lineEnding = validateTarget(lines, matches[0]?.index);
+  const lineEnding = validateTarget(
+    lines,
+    matches[0]?.index,
+    matches.length === 0,
+  );
 
   const serialized = serialize(value);
   if (matches.length === 1) {
@@ -171,7 +177,7 @@ export function setEnvironmentAssignment(
       ending: lineEnding,
     });
   }
-  validateTarget(lines);
+  validateTarget(lines, undefined, false);
 
   return Buffer.from(
     lines.map(({ body, ending }) => body + ending).join(""),

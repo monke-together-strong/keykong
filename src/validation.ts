@@ -371,18 +371,24 @@ export async function validateRequest(
     string,
     { identity: TargetIdentity; lines: number; content?: Buffer }
   >();
+  const inspectedTargetsByIdentity = new Map<
+    string,
+    { identity: TargetIdentity; lines: number; content?: Buffer }
+  >();
   const environmentKeysByTarget = new Map<string, Set<string>>();
   for (const [index, delivery] of deliveries.entries()) {
     deadline.assertActive();
-    const target = inspectedTargets.get(delivery.path) ??
+    const inspectedTarget = inspectedTargets.get(delivery.path) ??
       await inspectTarget(
         delivery,
         deadline,
         environmentTargetPaths.has(delivery.path),
-    );
+      );
+    const targetKey =
+      `${inspectedTarget.identity.dev}:${inspectedTarget.identity.ino}`;
+    const target = inspectedTargetsByIdentity.get(targetKey) ?? inspectedTarget;
     targets.set(delivery.id, target.identity);
     if (delivery.operation === "set_env") {
-      const targetKey = `${target.identity.dev}:${target.identity.ino}`;
       const assignedKeys = environmentKeysByTarget.get(targetKey) ??
         new Set<string>();
       if (assignedKeys.has(delivery.key)) {
@@ -420,11 +426,13 @@ export async function validateRequest(
       );
       nextContent = target.content;
     }
-    inspectedTargets.set(delivery.path, {
+    const nextTarget = {
       identity: target.identity,
       lines: nextLines,
       content: nextContent,
-    });
+    };
+    inspectedTargets.set(delivery.path, nextTarget);
+    inspectedTargetsByIdentity.set(targetKey, nextTarget);
   }
 
   return {
