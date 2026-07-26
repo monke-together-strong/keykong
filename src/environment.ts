@@ -10,6 +10,10 @@ const assignmentPattern = new RegExp(
   "s",
 );
 
+function trimHorizontalStart(value: string): string {
+  return value.replace(/^[\t ]*/, "");
+}
+
 function physicalLines(text: string): PhysicalLine[] {
   const lines: PhysicalLine[] = [];
   let start = 0;
@@ -31,15 +35,30 @@ function physicalLines(text: string): PhysicalLine[] {
   return lines;
 }
 
-function validateTarget(lines: PhysicalLine[]): "\n" | "\r\n" {
+function validateTarget(
+  lines: PhysicalLine[],
+  replacedIndex?: number,
+): "\n" | "\r\n" {
   const endings = new Set(
     lines.flatMap(({ ending }) => ending === "" ? [] : [ending]),
   );
   if (endings.size > 1) throw new Error("mixed line endings");
 
   for (const [index, { body }] of lines.entries()) {
-    if (body.trimStart().startsWith("#")) continue;
-    const rightHandSide = assignmentPattern.exec(body)?.[1]?.trimStart();
+    if (trimHorizontalStart(body).startsWith("#")) continue;
+    const assignment = assignmentPattern.exec(body);
+    const rawRightHandSide = assignment?.[1];
+    if (
+      index !== replacedIndex &&
+      rawRightHandSide !== "" &&
+      rawRightHandSide !== undefined &&
+      /^[\t ]+$/.test(rawRightHandSide)
+    ) {
+      throw new Error("cross-line whitespace assignment");
+    }
+    const rightHandSide = rawRightHandSide === undefined
+      ? undefined
+      : trimHorizontalStart(rawRightHandSide);
     const quote = rightHandSide?.[0];
     if (
       (quote === '"' || quote === "'" || quote === "`") &&
@@ -85,18 +104,18 @@ export function setEnvironmentAssignment(
     ignoreBOM: true,
   }).decode(content);
   const lines = physicalLines(text);
-  const lineEnding = validateTarget(lines);
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const active = new RegExp(
     `^(${prefixPattern}${escapedKey}[\\t ]*=)(.*)$`,
     "s",
   );
   const matches = lines.flatMap(({ body }, index) => {
-    if (body.trimStart().startsWith("#")) return [];
+    if (trimHorizontalStart(body).startsWith("#")) return [];
     const match = active.exec(body);
     return match ? [{ index, prefix: match[1]! }] : [];
   });
   if (matches.length > 1) throw new Error("duplicate active key");
+  const lineEnding = validateTarget(lines, matches[0]?.index);
 
   const serialized = serialize(value);
   if (matches.length === 1) {

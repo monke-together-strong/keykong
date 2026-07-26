@@ -422,6 +422,11 @@ describe("built CLI response request", () => {
         after: 'API_TOKEN="highly-secret"\n',
       },
       {
+        name: "whitespace-only",
+        before: "API_TOKEN= \n",
+        after: 'API_TOKEN="highly-secret"\n',
+      },
+      {
         name: "double-quoted",
         before: 'API_TOKEN="old value"\n',
         after: 'API_TOKEN="highly-secret"\n',
@@ -545,6 +550,18 @@ describe("built CLI response request", () => {
       {
         name: "multiline-unicode-paragraph-separator",
         content: 'OTHER="first\u2029\nAPI_TOKEN=shadow\nsecond"\n',
+      },
+      {
+        name: "cross-line-whitespace-assignment",
+        content: "OTHER= \nAPI_TOKEN=shadow\n",
+      },
+      {
+        name: "bom-prefixed-multiline-assignment",
+        content: '\uFEFF# OTHER="first\nAPI_TOKEN=shadow\nsecond"\n',
+      },
+      {
+        name: "nbsp-prefixed-multiline-assignment",
+        content: '\u00A0# OTHER="first\nAPI_TOKEN=shadow\nsecond"\n',
       },
       {
         name: "mixed-line-endings",
