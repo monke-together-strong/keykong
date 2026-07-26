@@ -36,6 +36,14 @@ final class PromptTests: XCTestCase {
     @MainActor
     func testMainMenuExposesStandardEditingCommands() throws {
         let menu = PromptRunner.makeMainMenu()
+        let applicationMenu = try XCTUnwrap(menu.items.first?.submenu)
+        let quitItem = try XCTUnwrap(applicationMenu.items.first)
+        XCTAssertEqual(quitItem.title, "Quit KeyKong")
+        XCTAssertEqual(quitItem.action, #selector(NSApplication.terminate(_:)))
+        XCTAssertEqual(quitItem.keyEquivalent, "q")
+        XCTAssertEqual(quitItem.keyEquivalentModifierMask, [.command])
+        XCTAssertNil(quitItem.target)
+
         let editMenu = try XCTUnwrap(menu.item(withTitle: "Edit")?.submenu)
         let items = editMenu.items.filter { !$0.isSeparatorItem }
 

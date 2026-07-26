@@ -29,6 +29,18 @@ public enum PromptRunner {
 
     static func makeMainMenu() -> NSMenu {
         let mainMenu = NSMenu()
+        let applicationItem = NSMenuItem()
+        let applicationMenu = NSMenu()
+        applicationItem.submenu = applicationMenu
+        mainMenu.addItem(applicationItem)
+        applicationMenu.addItem(
+            NSMenuItem(
+                title: "Quit KeyKong",
+                action: #selector(NSApplication.terminate(_:)),
+                keyEquivalent: "q"
+            )
+        )
+
         let editMenu = NSMenu(title: "Edit")
         let editItem = NSMenuItem(
             title: "Edit",
