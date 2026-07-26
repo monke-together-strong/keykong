@@ -2,6 +2,11 @@
 
 A secure, blocking input Broker for agent skills and manual workflows.
 
+It presents desktop prompts, shows resolved destinations, routes submitted
+values through Broker-validated delivery specifications, and returns only
+outcomes and non-secret response values to the caller. This keeps secrets out
+of model context, logs, and tool responses.
+
 The shipped macOS architecture is one Bun package and one Swift package. Bun
 provides the sole public `key-kong` executable; Swift provides only the private,
 one-shot AppKit Prompt Adapter packaged as an application bundle.

@@ -8,6 +8,10 @@ values out of the invoking caller's context.
 **Request**:
 A blocking request for one or more user-supplied values and their proposed delivery to a sink.
 
+**Secret-bearing Request**:
+A request containing at least one secret field. It is the boundary at which an agent must use Key Kong instead of collecting values directly.
+_Avoid_: Secret request, secure prompt
+
 **Field**:
 A required value collected as part of a request under a stable field ID.
 Response fields may be text, single-select, or multi-select and are returned to
@@ -33,6 +37,10 @@ _Avoid_: Sink configuration, delivery template
 **Sink**:
 A request-scoped local destination that receives submitted values after broker validation and user submission.
 _Avoid_: Persistent sink, registered sink
+
+**Environment Assignment**:
+A key and the value of one single-valued Field represented in a dotenv-format Sink.
+_Avoid_: Environment variable, env entry
 
 **Submission**:
 The user's authorization to return the collected field values to the broker for delivery to the resolved sink.
