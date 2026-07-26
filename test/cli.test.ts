@@ -34,7 +34,6 @@ afterAll(async () => {
 
 function request() {
   return JSON.stringify({
-    schemaVersion: 1,
     id: "deploy",
     title: "Deploy",
     fields: [
@@ -60,7 +59,6 @@ function request() {
 
 function deliveryRequest(path: string) {
   return JSON.stringify({
-    schemaVersion: 1,
     id: "deploy-secret",
     title: "Deploy secret",
     fields: [
@@ -194,10 +192,12 @@ describe("built CLI response request", () => {
     );
   });
 
-  test("schema, help, and version expose the versioned contract", () => {
+  test("schema, help, and version expose the contract", () => {
     const schema = JSON.parse(run(["schema"]).stdout);
 
-    expect(schema.properties.schemaVersion.const).toBe(1);
+    expect(schema.required).toEqual(["id", "title", "fields"]);
+    expect(schema.additionalProperties).toBeFalse();
+    expect(schema.properties.schemaVersion).toBeUndefined();
     expect(schema.$defs.field.properties.type.enum).toEqual([
       "text",
       "secret",
@@ -328,9 +328,11 @@ describe("built CLI response request", () => {
     expect(result.stdout).toBe('{"status":"expired","values":{}}\n');
   });
 
-  test("invalid response request is rejected before launching the helper", async () => {
-    const marker = join(directory, "invalid-launched");
-    const input = request().replace('"schemaVersion":1', '"schemaVersion":2');
+  test("removed schemaVersion is rejected before launching the helper", async () => {
+    const marker = join(directory, "schema-version-launched");
+    const value = JSON.parse(request());
+    value.schemaVersion = 1;
+    const input = JSON.stringify(value);
 
     const result = run(["request", "-"], { stdin: input, marker });
 
@@ -357,7 +359,6 @@ describe("built CLI response request", () => {
   test("a secret without a delivery is rejected before launching the helper", async () => {
     const marker = join(directory, "unsupported-launched");
     const input = JSON.stringify({
-      schemaVersion: 1,
       id: "secret",
       title: "Secret",
       fields: [{ id: "token", label: "Token", type: "secret" }],
@@ -1575,14 +1576,9 @@ printf '%s\\n' '{"status":"submitted","values":{"environment":"prod","region":"u
     const build = Bun.spawnSync(
       [
         "bun",
-        "build",
-        "--compile",
-        "--define",
-        "KEY_KONG_TESTING=false",
+        join(root, "scripts/build.ts"),
         "--outfile",
         productionCLI,
-        join(root, "src/main.ts"),
-        join(root, "src/delivery-worker.ts"),
       ],
       { stdout: "pipe", stderr: "pipe" },
     );

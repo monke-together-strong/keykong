@@ -56,6 +56,7 @@ public struct PromptDelivery: Codable, Equatable, Sendable {
     public let path: String
     public let operation: DeliveryOperation
     public let line: Int?
+    public let template: String?
     public let key: String?
     public let field: String?
 
@@ -63,12 +64,14 @@ public struct PromptDelivery: Codable, Equatable, Sendable {
         path: String,
         operation: DeliveryOperation,
         line: Int? = nil,
+        template: String? = nil,
         key: String? = nil,
         field: String? = nil
     ) {
         self.path = path
         self.operation = operation
         self.line = line
+        self.template = template
         self.key = key
         self.field = field
     }

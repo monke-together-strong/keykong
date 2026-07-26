@@ -300,11 +300,10 @@ export async function validateRequest(
   const value = requireObject(raw, "request");
   exactKeys(
     value,
-    ["schemaVersion", "id", "title", "fields", "deliveries"],
-    ["schemaVersion", "id", "title", "fields"],
+    ["id", "title", "fields", "deliveries"],
+    ["id", "title", "fields"],
     "request",
   );
-  if (value.schemaVersion !== 1) invalid("schemaVersion must be 1");
   requireID(value.id, "request ID");
   singleLine(value.title, "request title");
   if (!Array.isArray(value.fields) || value.fields.length === 0) {

@@ -1,13 +1,13 @@
 #!/bin/sh
 set -eu
 
-rm -rf dist/bin dist/libexec
+rm -rf dist
 bun run build
 bun run build:helper
 
 identity=${KEY_KONG_SIGNING_IDENTITY:--}
 if [ "$identity" = "-" ]; then
-  echo "warning: KEY_KONG_SIGNING_IDENTITY unset; using an ad-hoc signature" >&2
+  echo "warning: KEY_KONG_SIGNING_IDENTITY unset; using an ad-hoc hardened signature" >&2
 fi
 app=dist/libexec/KeyKongPrompt.app
 helper=$app/Contents/MacOS/keykong-prompt
@@ -15,7 +15,7 @@ helper=$app/Contents/MacOS/keykong-prompt
 sign() {
   target=$1
   if [ "$identity" = "-" ]; then
-    codesign --force --sign - "$target"
+    codesign --force --options runtime --sign - "$target"
   else
     codesign --force --timestamp --options runtime --sign "$identity" "$target"
   fi
