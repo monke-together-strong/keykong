@@ -18,8 +18,7 @@ option adds no information.
 The request document carries the full prompt and delivery specification,
 including fields, the proposed sink, operations, and templates. Bun validates
 that specification against its built-in delivery policy before presenting the
-resolved sink to the user. It declares `schemaVersion` so incompatible request
-shapes fail explicitly. The document must never contain entered values.
+resolved sink to the user. The document must never contain entered values.
 
 Use ordinary options only for small invocation controls that are not already in
 the request schema. Do not represent fields, deliveries, templates, or secrets

@@ -127,8 +127,12 @@ const schema = Bun.spawnSync([cli, "schema"], {
   stdout: "pipe",
   stderr: "pipe",
 });
-if (schema.exitCode !== 0 || JSON.parse(schema.stdout.toString()).properties
-  ?.schemaVersion?.const !== 1) {
+const requestSchema = JSON.parse(schema.stdout.toString());
+if (
+  schema.exitCode !== 0 ||
+  requestSchema.additionalProperties !== false ||
+  !requestSchema.required?.includes("fields")
+) {
   throw new Error("packaged CLI schema smoke test failed");
 }
 

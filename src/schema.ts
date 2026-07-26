@@ -2,15 +2,14 @@ import { requestLimits } from "./limits";
 
 export const requestSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://keykong.dev/schema/request-v1.json",
+  $id: "https://keykong.dev/schema/request.json",
   title: "Key Kong request",
   description:
-    `Version 1 request contract for Key Kong. Serialized requests are limited to ${requestLimits.bytes} bytes.`,
+    `Request contract for Key Kong. Serialized requests are limited to ${requestLimits.bytes} bytes.`,
   type: "object",
   additionalProperties: false,
-  required: ["schemaVersion", "id", "title", "fields"],
+  required: ["id", "title", "fields"],
   properties: {
-    schemaVersion: { const: 1 },
     id: { $ref: "#/$defs/id" },
     title: { $ref: "#/$defs/singleLine" },
     fields: {

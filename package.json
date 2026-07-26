@@ -5,12 +5,13 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "bun build --compile --define KEY_KONG_TESTING=false --outfile dist/bin/keykong src/main.ts src/delivery-worker.ts",
-    "build:test": "bun build --compile --define KEY_KONG_TESTING=true --outfile dist/bin/keykong src/main.ts src/delivery-worker.ts",
+    "build": "bun scripts/build.ts",
+    "build:test": "bun scripts/build.ts --testing",
     "build:helper": "sh scripts/build-macos-helper.sh",
     "install:local": "sh scripts/install-local.sh",
     "package:macos": "sh scripts/package-macos.sh",
     "smoke:ui": "bun run package:macos && bun scripts/run-macos-ui-smoke.ts",
+    "test:ui": "bun scripts/test-macos-ui.ts",
     "check": "bunx tsc --noEmit",
     "test": "bun run build:test && bun test",
     "test:swift": "swift test --package-path native/macos"

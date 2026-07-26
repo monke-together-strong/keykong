@@ -1,32 +1,32 @@
 ---
 name: keykong
-description: Secret boundary for user input. Use Key Kong when a workflow must collect a secret or broker user-supplied values into an existing local file.
+description: Secret boundary for user input. Use when a workflow must collect any secret, or deliver user-supplied values into an existing local file through Key Kong.
 ---
 
 # Key Kong
 
-Key Kong is the secret boundary. If any Field is secret, route the whole Request
-through Key Kong so related fields and deliveries remain one operation.
+Key Kong brokers a blocking Request while keeping submitted secrets inside its
+Prompt Adapter and Broker boundary.
 
-- Use it for passwords, tokens, API keys, private keys, and other values that
-  must stay out of agent context.
-- Use it when user-supplied values should be delivered through validated
-  `append`, `insert_line`, or `set_env` operations.
-- Collect purely non-secret values directly when brokered delivery adds no
-  value.
+## 1. Choose the boundary
 
-## Request contract
+- If any Field is secret, route the whole Request through Key Kong so its
+  related Fields and Deliveries remain one operation. Passwords, tokens, API
+  keys, and private keys are secrets.
+- With only non-secret Fields, use Key Kong when its validated `append`,
+  `insert_line`, or `set_env` Delivery adds value; otherwise collect the values
+  directly.
+- If a secret-bearing Request cannot reach `keykong`, stop before collection
+  and report that Key Kong must be installed or built.
 
-Pass a JSON Request by file or explicit standard input:
+This step is complete when every requested value has one collection route.
 
-```sh
-keykong request request.json
-producer | keykong request -
-```
+## 2. Build the Request
+
+Use stable IDs and ordered, required Fields:
 
 ```json
 {
-  "schemaVersion": 1,
   "id": "configure-service",
   "title": "Configure service",
   "fields": [
@@ -45,24 +45,38 @@ producer | keykong request -
 }
 ```
 
-Fields are required and ordered. Types are `text`, `secret`, `select`, and
-`multi_select`; select types add `{ "label", "value" }` options. Every secret
-Field needs a Delivery.
+Field types are `text`, `secret`, `select`, and `multi_select`. Select Fields
+add ordered `{ "label", "value" }` options. Every secret Field must be
+referenced by at least one Delivery.
 
-Deliveries target existing, writable regular files at absolute paths:
+Deliveries target existing, readable and writable regular files at absolute
+paths:
 
 - `append`: requires `template`.
 - `insert_line`: requires `template` and positive one-based `line`.
 - `set_env`: requires `key` and one single-valued `field`.
 
-Run `keykong schema` when exact validation constraints are needed. Key Kong
-writes one JSON result with `status` and non-secret `values`; statuses are
-`completed`, `partial`, `failed`, `cancelled`, or `expired`. Treat the JSON
-status as authoritative.
+Templates must contain at least one `{{ field-id }}` reference.
 
-If Key Kong is unavailable, stop before collecting the secret and report that
-it must be installed or built.
+Before using fields or constraints not shown above, inspect the authoritative
+contract with `keykong schema`.
 
-Completion criterion: every secret is a `secret` Field referenced by a
-Delivery, no submitted secret enters agent-visible input or output, and the
-caller's result handling covers Key Kong's returned status.
+This step is complete when every secret Field has a Delivery, every Delivery
+matches its operation contract, and every target is an existing readable and
+writable regular file at an absolute path.
+
+## 3. Invoke and handle the result
+
+Pass the JSON Request by file or explicit standard input:
+
+```sh
+keykong request request.json
+producer | keykong request -
+```
+
+Key Kong writes one JSON result containing `status` and non-secret `values`.
+Treat `completed`, `partial`, `failed`, `cancelled`, and `expired` as distinct
+authoritative outcomes.
+
+This step is complete when the caller handles the returned status and values,
+and no submitted secret appears in agent-visible input or output.

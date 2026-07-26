@@ -42,7 +42,6 @@ export type Delivery =
   | SetEnvDelivery;
 
 export interface Request {
-  schemaVersion: 1;
   id: string;
   title: string;
   fields: Field[];

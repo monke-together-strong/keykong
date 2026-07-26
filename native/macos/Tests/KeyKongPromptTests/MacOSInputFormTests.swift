@@ -16,6 +16,9 @@ final class MacOSInputFormTests: XCTestCase {
 
         XCTAssertTrue(form.window.styleMask.contains(.miniaturizable))
         XCTAssertEqual(form.window.level, .normal)
+        XCTAssertTrue(
+            form.window.collectionBehavior.contains(.moveToActiveSpace)
+        )
     }
 
     func testThemedHeaderAndFooterControlsStayCentered() throws {
@@ -56,7 +59,6 @@ final class MacOSInputFormTests: XCTestCase {
         XCTAssertGreaterThan(textFrame.height, 40)
         XCTAssertEqual(cancelFrame.midY, sendFrame.midY, accuracy: 0.5)
         XCTAssertEqual(cancelFrame.height, sendFrame.height, accuracy: 0.5)
-        XCTAssertTrue(KeyKongPointerCursor.isInstalled(on: form.detailsButton))
         XCTAssertTrue(
             KeyKongPointerCursor.isInstalled(
                 on: try XCTUnwrap(
@@ -64,6 +66,96 @@ final class MacOSInputFormTests: XCTestCase {
                 )
             )
         )
+    }
+
+    func testTwoFieldFormKeepsTheHeaderCloseToTheFirstField() throws {
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Credentials needed",
+                fields: [
+                    PromptField(
+                        id: "github_token",
+                        label: "GitHub token",
+                        type: .secret
+                    ),
+                    PromptField(
+                        id: "deploy_token",
+                        label: "Deploy token",
+                        type: .secret
+                    )
+                ],
+                deliveries: [
+                    PromptDelivery(
+                        path: "/tmp/output",
+                        operation: .append
+                    )
+                ]
+            )
+        ) { _ in }
+        let root = try XCTUnwrap(form.window.contentView)
+        root.layoutSubtreeIfNeeded()
+        let emblem = try XCTUnwrap(descendant("emblem", in: root))
+        let heading = try XCTUnwrap(descendant("heading", in: root))
+        let reassurance = try XCTUnwrap(descendant("reassurance", in: root))
+        let firstField = form.inputViews[0]
+        let firstRow = try XCTUnwrap(firstField.superview)
+        let headerContentFrame = emblem.convert(emblem.bounds, to: root).union(
+            heading.convert(heading.bounds, to: root)
+        ).union(
+            reassurance.convert(reassurance.bounds, to: root)
+        )
+        let firstRowFrame = firstRow.convert(firstRow.bounds, to: root)
+        let gap = headerContentFrame.minY - firstRowFrame.maxY
+
+        XCTAssertEqual(
+            gap,
+            20,
+            accuracy: 0.5,
+            "The header-to-form gap should match the compact themed mockup"
+        )
+        let detailsFrame = form.detailsButton.convert(
+            form.detailsButton.bounds,
+            to: root
+        )
+        let footerControlsFrame = form.cancelButton.convert(
+            form.cancelButton.bounds,
+            to: root
+        ).union(
+            form.sendButton.convert(form.sendButton.bounds, to: root)
+        )
+        let footerGap = detailsFrame.minY - footerControlsFrame.maxY
+
+        XCTAssertEqual(
+            footerGap,
+            29,
+            accuracy: 0.5,
+            "Details should stay visually connected to the footer controls"
+        )
+    }
+
+    func testInteractiveIconsUseThePointingHandCursor() {
+        let button = CursorRecordingButton()
+
+        button.resetCursorRects()
+
+        XCTAssertTrue(button.recordedCursors.contains { cursor in
+            cursor === NSCursor.pointingHand
+        })
+    }
+
+    func testShieldLockMatchesTheUnlockedIconCanvasAndUsesExplicitColor() throws {
+        let shield = try XCTUnwrap(
+            KeyKongTheme.shieldLockSymbol(description: "Reveal secret")
+        )
+        let unlocked = try XCTUnwrap(
+            KeyKongTheme.symbol(
+                "lock.open.fill",
+                description: "Hide secret"
+            )
+        )
+
+        XCTAssertEqual(shield.size, unlocked.size)
+        XCTAssertFalse(shield.isTemplate)
     }
 
     func testLongHeadingStaysWithinTheHeader() throws {
@@ -223,6 +315,80 @@ final class MacOSInputFormTests: XCTestCase {
             )
             return scrollView.contentView.bounds.contains(detailsFrame)
         })
+    }
+
+    func testDetailsExpansionGrowsTheWindowAndCollapseRestoresIt() {
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Expandable details",
+                fields: [
+                    PromptField(id: "token", label: "Token", type: .secret)
+                ],
+                deliveries: [
+                    PromptDelivery(path: "/tmp/one", operation: .append),
+                    PromptDelivery(path: "/tmp/two", operation: .append)
+                ]
+            )
+        ) { _ in }
+        let collapsedFrame = form.window.frame
+
+        form.detailsButton.performClick(nil)
+
+        XCTAssertTrue(wait {
+            form.window.frame.height > collapsedFrame.height
+        })
+        XCTAssertEqual(
+            form.window.frame.maxY,
+            collapsedFrame.maxY,
+            accuracy: 0.5
+        )
+
+        form.detailsButton.performClick(nil)
+
+        XCTAssertTrue(wait {
+            abs(form.window.frame.height - collapsedFrame.height) < 0.5
+        })
+        XCTAssertEqual(
+            form.window.frame.maxY,
+            collapsedFrame.maxY,
+            accuracy: 0.5
+        )
+    }
+
+    func testDetailsExpansionSuppressesTheTransientScroller() throws {
+        let form = MacOSInputFormController(
+            request: PromptRequest(
+                title: "Smooth details",
+                fields: [
+                    PromptField(id: "token", label: "Token", type: .secret)
+                ],
+                deliveries: [
+                    PromptDelivery(path: "/tmp/one", operation: .append),
+                    PromptDelivery(path: "/tmp/two", operation: .append)
+                ]
+            )
+        ) { _ in }
+        let root = try XCTUnwrap(form.window.contentView)
+        let scrollView = try XCTUnwrap(
+            descendant("form-scroll", in: root) as? NSScrollView
+        )
+        form.window.orderFront(nil)
+        let scrollerStates = BoolRecorder()
+        let observation = scrollView.observe(
+            \.hasVerticalScroller,
+            options: [.new]
+        ) { _, change in
+            if let state = change.newValue {
+                scrollerStates.append(state)
+            }
+        }
+
+        form.detailsButton.performClick(nil)
+
+        XCTAssertEqual(scrollerStates.values.first, false)
+        XCTAssertEqual(scrollerStates.values.last, true)
+        withExtendedLifetime(observation) {}
+        form.window.orderOut(nil)
     }
 
     func testValidationScrollsTheFirstInvalidFieldIntoView() throws {
@@ -397,6 +563,10 @@ final class MacOSInputFormTests: XCTestCase {
         let secretInput = try XCTUnwrap(form.inputViews.first as? SecretInputView)
         form.window.contentView?.layoutSubtreeIfNeeded()
         XCTAssertTrue(secretInput.revealButton is KeyKongPointerButton)
+        XCTAssertEqual(
+            secretInput.revealButton.image?.accessibilityDescription,
+            "Reveal secret"
+        )
         let concealedButtonFrame = secretInput.revealButton.frame
         XCTAssertFalse(secretInput.secureTextField.isHidden)
         XCTAssertTrue(secretInput.revealedTextField.isHidden)
@@ -525,5 +695,32 @@ final class MacOSInputFormTests: XCTestCase {
                 "services": .selection(["api", "web"])
             ])
         )
+    }
+}
+
+@MainActor
+private final class CursorRecordingButton: KeyKongPointerButton {
+    private(set) var recordedCursors: [NSCursor] = []
+
+    override func addCursorRect(_ rect: NSRect, cursor object: NSCursor) {
+        recordedCursors.append(object)
+        super.addCursorRect(rect, cursor: object)
+    }
+}
+
+private final class BoolRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedValues: [Bool] = []
+
+    var values: [Bool] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedValues
+    }
+
+    func append(_ value: Bool) {
+        lock.lock()
+        defer { lock.unlock() }
+        recordedValues.append(value)
     }
 }

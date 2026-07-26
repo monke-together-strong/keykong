@@ -45,7 +45,6 @@ import { Command } from "@commander-js/extra-typings";
 import * as z from "zod";
 
 export const RequestSchema = z.strictObject({
-  schemaVersion: z.literal(1),
   id: z.string().min(1),
   title: z.string().min(1),
   fields: z.array(FieldSchema).min(1),

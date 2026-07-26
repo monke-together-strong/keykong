@@ -2,6 +2,8 @@ import AppKit
 
 @MainActor
 final class MacOSInputFormController: NSObject, NSWindowDelegate {
+    private static let bodySpacing: CGFloat = 18
+
     let window: NSWindow
     let sendButton: NSButton
     let cancelButton: NSButton
@@ -14,6 +16,8 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
     private let request: PromptRequest
     private let onComplete: (PromptOutcome) -> Void
     private var didComplete = false
+    private var collapsedWindowHeight: CGFloat?
+    private weak var formScrollView: NSScrollView?
 
     init(
         request: PromptRequest,
@@ -25,7 +29,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         self.request = request
         self.onComplete = onComplete
         self.window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 470),
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 426),
             styleMask: [
                 .titled,
                 .closable,
@@ -138,6 +142,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
 
     private func configureWindow() {
         window.title = request.title
+        window.collectionBehavior.insert(.moveToActiveSpace)
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.backgroundColor = KeyKongTheme.charcoal
@@ -234,7 +239,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         let textBlock = NSLayoutGuide()
         header.addLayoutGuide(textBlock)
         NSLayoutConstraint.activate([
-            header.heightAnchor.constraint(greaterThanOrEqualToConstant: 88),
+            header.heightAnchor.constraint(equalToConstant: 88),
             emblem.leadingAnchor.constraint(equalTo: header.leadingAnchor),
             emblem.topAnchor.constraint(equalTo: header.topAnchor),
             textBlock.leadingAnchor.constraint(
@@ -298,13 +303,14 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
         scrollView.translatesAutoresizingMaskIntoConstraints = false
+        formScrollView = scrollView
 
         let bodyStack = NSStackView(
             views: [fieldsStack, detailsButton, detailsView]
         )
         bodyStack.orientation = .vertical
         bodyStack.alignment = .leading
-        bodyStack.spacing = 18
+        bodyStack.spacing = Self.bodySpacing
         bodyStack.translatesAutoresizingMaskIntoConstraints = false
 
         let documentView = KeyKongFlippedView()
@@ -438,18 +444,69 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
 
     @objc private func toggleDetails() {
         let isExpanded = detailsButton.state == .on
+        if window.isVisible {
+            formScrollView?.hasVerticalScroller = false
+        }
         detailsView.isHidden = !isExpanded
         detailsButton.image = NSImage(
             systemSymbolName: isExpanded ? "chevron.down" : "chevron.right",
             accessibilityDescription:
                 isExpanded ? "Hide details" : "Show details"
         )
+        resizeWindowForDetails(isExpanded: isExpanded)
+    }
+
+    private func resizeWindowForDetails(isExpanded: Bool) {
+        let frame = window.frame
+        let targetHeight: CGFloat
+
         if isExpanded {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                detailsView.superview?.layoutSubtreeIfNeeded()
-                detailsView.scrollToVisible(detailsView.bounds)
+            collapsedWindowHeight = collapsedWindowHeight ?? frame.height
+            window.contentView?.layoutSubtreeIfNeeded()
+            let desiredHeight = frame.height
+                + detailsView.fittingSize.height
+                + Self.bodySpacing
+            if window.isVisible, let visibleFrame = window.screen?.visibleFrame {
+                let availableHeight = frame.maxY - visibleFrame.minY
+                targetHeight = min(
+                    desiredHeight,
+                    max(frame.height, availableHeight)
+                )
+            } else {
+                targetHeight = desiredHeight
             }
+        } else {
+            targetHeight = collapsedWindowHeight ?? frame.height
+            collapsedWindowHeight = nil
+        }
+
+        guard abs(targetHeight - frame.height) > 0.5 else {
+            finishDetailsTransition(isExpanded: isExpanded)
+            return
+        }
+        var targetFrame = frame
+        targetFrame.size.height = targetHeight
+        targetFrame.origin.y = frame.maxY - targetHeight
+        if window.isVisible {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                window.animator().setFrame(targetFrame, display: true)
+            } completionHandler: {
+                Task { @MainActor [weak self] in
+                    self?.finishDetailsTransition(isExpanded: isExpanded)
+                }
+            }
+        } else {
+            window.setFrame(targetFrame, display: true)
+            finishDetailsTransition(isExpanded: isExpanded)
+        }
+    }
+
+    private func finishDetailsTransition(isExpanded: Bool) {
+        formScrollView?.hasVerticalScroller = true
+        if isExpanded {
+            detailsView.superview?.layoutSubtreeIfNeeded()
+            detailsView.scrollToVisible(detailsView.bounds)
         }
     }
 
@@ -613,11 +670,8 @@ final class SecretInputView: NSView {
                 description: description
             )
         } else {
-            // The shield needs a larger optical box to match the open lock.
-            revealButton.image = KeyKongTheme.symbol(
-                "lock.shield.fill",
-                description: description,
-                glyphLimit: 16
+            revealButton.image = KeyKongTheme.shieldLockSymbol(
+                description: description
             )
         }
         revealButton.toolTip = description
