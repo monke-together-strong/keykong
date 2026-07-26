@@ -9,6 +9,8 @@ const assignmentPattern = new RegExp(
   `^${targetPrefixPattern}[^#=\\t ][^=]*=(.*)$`,
   "s",
 );
+const hiddenAssignmentPattern =
+  /^=+[\t ]*(?:export [\t ]*)?[A-Za-z_][A-Za-z0-9_]*[\t ]*=/;
 
 function trimHorizontalStart(value: string): string {
   return value.replace(/^[\t ]*/, "");
@@ -63,8 +65,8 @@ function validateTarget(
   for (const [index, { body }] of lines.entries()) {
     const trimmedBody = trimHorizontalStart(body);
     if (trimmedBody.startsWith("#")) continue;
-    if (trimmedBody.startsWith("=")) {
-      throw new Error("leading empty key");
+    if (hiddenAssignmentPattern.test(trimmedBody)) {
+      throw new Error("hidden assignment");
     }
     const assignment = assignmentPattern.exec(body);
     const rawRightHandSide = assignment?.[1];

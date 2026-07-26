@@ -423,6 +423,11 @@ describe("built CLI response request", () => {
         after: 'API_TOKEN="highly-secret"\n',
       },
       {
+        name: "shorter-replacement",
+        before: "API_TOKEN=a-very-long-value-that-must-be-truncated\nAFTER=one\n",
+        after: 'API_TOKEN="highly-secret"\nAFTER=one\n',
+      },
+      {
         name: "whitespace-only",
         before: "API_TOKEN= \n",
         after: 'API_TOKEN="highly-secret"\n',
@@ -458,6 +463,12 @@ describe("built CLI response request", () => {
         before: "# API_TOKEN=old\napi_token=other\n",
         after:
           '# API_TOKEN=old\napi_token=other\nAPI_TOKEN="highly-secret"\n',
+      },
+      {
+        name: "skipped-empty-key-line",
+        before: "=ignored\nOTHER=one\n",
+        after:
+          '=ignored\nOTHER=one\nAPI_TOKEN="highly-secret"\n',
       },
     ];
 
