@@ -562,6 +562,20 @@ describe("built CLI response request", () => {
     expect(await readFile(target, "utf8")).toBe("API_TOKEN=old\n");
   });
 
+  test("set_env rejects physical newlines before delivery", async () => {
+    const target = join(directory, "multiline-submission.env");
+    await writeFile(target, "API_TOKEN=old\n");
+
+    const result = run(["request", "-"], {
+      stdin: setEnvRequest(target),
+      secret: 'left\nright"\'',
+    });
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout).error.code).toBe("PROMPT_FAILED");
+    expect(await readFile(target, "utf8")).toBe("API_TOKEN=old\n");
+  });
+
   test("set_env policy is rejected before launching the Prompt Adapter", async () => {
     const target = join(directory, "set-env-validated.env");
     const link = join(directory, "set-env-validated-link.env");

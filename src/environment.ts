@@ -53,6 +53,7 @@ function validateTarget(lines: PhysicalLine[]): "\n" | "\r\n" {
 }
 
 function serialize(value: string): string {
+  // Submission validation rejects physical line breaks before delivery.
   // Node expands a literal \n sequence only inside double quotes.
   if (!value.includes('"') && !value.includes(String.raw`\n`)) {
     return `"${value}"`;
