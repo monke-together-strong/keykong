@@ -58,8 +58,8 @@ paths:
 
 Templates must contain at least one `{{ field-id }}` reference.
 
-Before using fields or constraints not shown above, inspect the authoritative
-contract with `keykong schema`.
+Requests are unversioned. Before using properties or constraints not shown
+above, inspect the authoritative contract with `keykong schema`.
 
 This step is complete when every secret Field has a Delivery, every Delivery
 matches its operation contract, and every target is an existing readable and
