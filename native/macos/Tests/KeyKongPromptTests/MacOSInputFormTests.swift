@@ -965,6 +965,31 @@ final class MacOSInputFormTests: XCTestCase {
         )
     }
 
+    func testMultiSelectMaySubmitNoSelections() {
+        let request = PromptRequest(
+            title: "Select features",
+            fields: [
+                PromptField(
+                    id: "features",
+                    label: "Features",
+                    type: .multiSelect,
+                    options: [
+                        PromptOption(label: "Audit", value: "audit"),
+                        PromptOption(label: "Alerts", value: "alerts")
+                    ]
+                )
+            ]
+        )
+        var outcome: PromptOutcome?
+        let form = MacOSInputFormController(request: request) {
+            outcome = $0
+        }
+
+        form.sendButton.performClick(nil)
+
+        XCTAssertEqual(outcome, .submitted(["features": .selection([])]))
+    }
+
     func testFormPresentsAndSubmitsRequiredFieldsInRequestOrder() throws {
         let request = PromptRequest(
             title: "Prepare release",

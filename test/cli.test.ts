@@ -697,10 +697,6 @@ describe("built CLI response request", () => {
         input: setEnvRequest(target, "TOKEN", "missing"),
       },
       {
-        name: "multi-select-field",
-        input: setEnvRequest(target, "FEATURES", "features"),
-      },
-      {
         name: "template-property",
         input: withDeliveries(target, [{
           id: "forbidden-template",
@@ -850,10 +846,15 @@ describe("built CLI response request", () => {
     }
   });
 
-  test("set_env accepts text and single-select source fields", async () => {
+  test("set_env preserves scalar values and JSON-encodes multi-select values", async () => {
     const cases = [
       { field: "environment", key: "ENVIRONMENT", value: "prod" },
       { field: "region", key: "REGION", value: "us-west-2" },
+      {
+        field: "features",
+        key: "FEATURES",
+        value: '["audit","alerts"]',
+      },
     ];
 
     for (const testCase of cases) {
@@ -873,10 +874,31 @@ describe("built CLI response request", () => {
       });
 
       expect(result.code).toBe(0);
-      expect(await readFile(target, "utf8")).toBe(
-        `${testCase.key}="${testCase.value}"\n`,
-      );
+      const content = await readFile(target, "utf8");
+      expect(parseWithNode(content)[testCase.key]).toBe(testCase.value);
     }
+  });
+
+  test("multi-select fields may submit and deliver an empty array", async () => {
+    const target = join(directory, "empty-selection.env");
+    await writeFile(target, "");
+    const input = JSON.parse(request());
+    input.deliveries = [{
+      id: "features",
+      path: target,
+      operation: "set_env",
+      key: "FEATURES",
+      field: "features",
+    }];
+
+    const result = run(["request", "-"], {
+      stdin: JSON.stringify(input),
+      mode: "empty_selection",
+    });
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout).values.features).toEqual([]);
+    expect(parseWithNode(await readFile(target, "utf8")).FEATURES).toBe("[]");
   });
 
   test("different set_env keys stay ordered with existing operations", async () => {

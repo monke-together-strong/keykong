@@ -1,3 +1,7 @@
+import {
+  requireResponseValue,
+  serializeResponseValue,
+} from "./response-value";
 import type { ResponseValue } from "./types";
 
 const fieldReference =
@@ -35,8 +39,7 @@ export function renderTemplate(
 ): Buffer {
   return Buffer.from(
     template.replace(fieldReference, (_, fieldID: string) => {
-      const value = values[fieldID]!;
-      return Array.isArray(value) ? JSON.stringify(value) : value;
+      return serializeResponseValue(requireResponseValue(values, fieldID));
     }),
   );
 }

@@ -176,12 +176,7 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
                     .compactMap { option, view -> String? in
                         (view as? NSButton)?.state == .on ? option.value : nil
                     }
-                if selected.isEmpty {
-                    markInvalid(field.id)
-                    firstInvalidView = firstInvalidView ?? stack.arrangedSubviews.first
-                } else {
-                    values[field.id] = .selection(selected)
-                }
+                values[field.id] = .selection(selected)
             }
         }
 

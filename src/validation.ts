@@ -161,11 +161,6 @@ function validateDelivery(
         `set_env delivery '${delivery.id}' references unknown field '${delivery.field}'`,
       );
     }
-    if (field.type === "multi_select") {
-      invalid(
-        `set_env delivery '${delivery.id}' field must be single-valued`,
-      );
-    }
     return {
       delivery: delivery as unknown as Delivery,
       references: [delivery.field],
@@ -517,7 +512,6 @@ export function validateSubmission(
     } else {
       if (
         !Array.isArray(value) ||
-        value.length === 0 ||
         value.some((entry) => typeof entry !== "string") ||
         new Set(value).size !== value.length
       ) {

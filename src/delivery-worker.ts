@@ -1,23 +1,32 @@
+import { ok } from "node:assert/strict";
+
 import { insertBeforeLine } from "./content";
 import {
   setEnvironmentAssignment,
   validateEnvironmentContent,
 } from "./environment";
+import {
+  requireResponseValue,
+  serializeResponseValue,
+} from "./response-value";
 import { renderTemplate } from "./template";
 import { openTarget, type TargetIdentity } from "./target";
-import type {
-  Delivery,
-  DeliveryWorkerRequest,
-  ResponseValue,
-} from "./types";
+import type { Delivery, DeliveryWorkerRequest } from "./types";
 
 declare const KEY_KONG_TESTING: boolean;
 declare var self: Worker;
 
+function serializeEnvironmentFieldValue(
+  values: DeliveryWorkerRequest["values"],
+  field: string,
+) {
+  return serializeResponseValue(requireResponseValue(values, field));
+}
+
 function prepareContent(
   delivery: Delivery,
   content: Buffer,
-  values: Record<string, ResponseValue>,
+  values: DeliveryWorkerRequest["values"],
 ): Buffer | undefined {
   switch (delivery.operation) {
     case "append":
@@ -32,14 +41,14 @@ function prepareContent(
       return setEnvironmentAssignment(
         content,
         delivery.key,
-        values[delivery.field] as string,
+        serializeEnvironmentFieldValue(values, delivery.field),
       );
   }
 }
 
 async function execute(
   delivery: Delivery,
-  values: Record<string, ResponseValue>,
+  values: DeliveryWorkerRequest["values"],
   expected: TargetIdentity,
   protectedValues?: ReadonlyMap<string, string>,
 ) {
@@ -94,7 +103,8 @@ self.onmessage = async (event: MessageEvent<DeliveryWorkerRequest>) => {
     const failed: string[] = [];
     const environmentTargets = new Map<string, Map<string, string>>();
     for (const delivery of event.data.deliveries) {
-      const target = targets.get(delivery.id)!;
+      const target = targets.get(delivery.id);
+      ok(target, `missing target for ${delivery.id}`);
       const targetKey = `${target.dev}:${target.ino}`;
       const protectedValues = environmentTargets.get(targetKey);
       if (
@@ -115,7 +125,7 @@ self.onmessage = async (event: MessageEvent<DeliveryWorkerRequest>) => {
           const targetValues = protectedValues ?? new Map<string, string>();
           targetValues.set(
             delivery.key,
-            event.data.values[delivery.field] as string,
+            serializeEnvironmentFieldValue(event.data.values, delivery.field),
           );
           environmentTargets.set(targetKey, targetValues);
         }
