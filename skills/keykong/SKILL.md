@@ -46,15 +46,16 @@ Use stable IDs and ordered, required Fields:
 ```
 
 Field types are `text`, `secret`, `select`, and `multi_select`. Select Fields
-add ordered `{ "label", "value" }` options. Every secret Field must be
-referenced by at least one Delivery.
+add ordered `{ "label", "value" }` options; a multi-select may return an empty
+array. Every secret Field must be referenced by at least one Delivery.
 
 Deliveries target existing, readable and writable regular files at absolute
 paths:
 
 - `append`: requires `template`.
 - `insert_line`: requires `template` and positive one-based `line`.
-- `set_env`: requires `key` and one single-valued `field`.
+- `set_env`: requires `key` and one `field`; multi-select values are stored as
+  JSON arrays.
 
 Templates must contain at least one `{{ field-id }}` reference.
 

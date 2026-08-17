@@ -15,7 +15,9 @@ _Avoid_: Secret request, secure prompt
 **Field**:
 A required value collected as part of a request under a stable field ID.
 Response fields may be text, single-select, or multi-select and are returned to
-the caller. Secret fields are delivered but never returned.
+the caller. Required means the field must be present in the Submission; a
+multi-select value may be an empty array when the user selects no options.
+Secret fields are delivered but never returned.
 
 **Option**:
 A select choice with a display-only label and a stable returned value.
@@ -39,7 +41,8 @@ A request-scoped local destination that receives submitted values after broker v
 _Avoid_: Persistent sink, registered sink
 
 **Environment Assignment**:
-A key and the value of one single-valued Field represented in a dotenv-format Sink.
+A key and one Field value represented in a dotenv-format Sink. Multi-select
+values use JSON arrays.
 _Avoid_: Environment variable, env entry
 
 **Submission**:

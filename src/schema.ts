@@ -112,7 +112,7 @@ export const requestSchema = {
         operation: {
           const: "set_env",
           description:
-            "Sets one Environment Assignment from one single-valued field.",
+            "Sets one Environment Assignment from one field. Multi-select values are encoded as JSON arrays.",
         },
         key: {
           type: "string",
@@ -121,8 +121,7 @@ export const requestSchema = {
         },
         field: {
           $ref: "#/$defs/id",
-          description:
-            "The stable ID of a text, secret, or single-select source field.",
+          description: "The stable ID of the source field.",
         },
       },
     },

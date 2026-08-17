@@ -108,6 +108,18 @@ switch (process.env.KEY_KONG_FAKE_MODE) {
       }),
     );
     break;
+  case "empty_selection":
+    console.log(
+      JSON.stringify({
+        status: "submitted",
+        values: {
+          environment: "prod",
+          region: "us-west-2",
+          features: [],
+        },
+      }),
+    );
+    break;
   case "empty":
     console.log(
       JSON.stringify({
