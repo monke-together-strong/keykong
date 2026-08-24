@@ -1,6 +1,6 @@
 ---
 name: keykong
-description: Secret boundary for user input. Use when a workflow must collect any secret, or deliver user-supplied values into an existing local file through Key Kong.
+description: Secret boundary for user input. Use only when a workflow must ask the user to supply a secret, optionally delivering that user-entered value into an existing local file.
 ---
 
 # Key Kong
@@ -10,12 +10,14 @@ Prompt Adapter and Broker boundary.
 
 ## 1. Choose the boundary
 
-- If any Field is secret, route the whole Request through Key Kong so its
-  related Fields and Deliveries remain one operation. Passwords, tokens, API
-  keys, and private keys are secrets.
-- With only non-secret Fields, use Key Kong when its validated `append`,
-  `insert_line`, or `set_env` Delivery adds value; otherwise collect the values
-  directly.
+- When the workflow must ask the user for a secret, route the whole Request
+  through Key Kong so its related Fields and Deliveries remain one operation.
+  Passwords, tokens, API keys, and private keys are secrets.
+- Keep secrets already available through an authenticated tool or service
+  inside that tool's non-disclosing workflow; Key Kong is not an intermediary
+  for them.
+- Related non-secret Fields may share a secret-bearing Request. Collect
+  standalone non-secret values directly.
 - If a secret-bearing Request cannot reach `keykong`, stop before collection
   and report that Key Kong must be installed or built.
 
