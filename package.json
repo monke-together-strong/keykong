@@ -16,7 +16,8 @@
     "test:swift": "swift test --package-path native/macos"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.21",
+    "@types/bun": "^1.4.0",
     "typescript": "^5.9.2"
-  }
+  },
+  "packageManager": "bun@1.4.0"
 }
