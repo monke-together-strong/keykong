@@ -17,6 +17,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { parseEnv } from "node:util";
 
 const root = resolve(import.meta.dir, "..");
 const cli = join(root, "dist/bin/keykong");
@@ -113,29 +114,8 @@ function setEnvRequest(path: string, key = "API_TOKEN", field = "api_token") {
   ]);
 }
 
-const nodeParseEnvScript = `
-const { readFileSync } = require("node:fs");
-const { parseEnv } = require("node:util");
-
-const content = readFileSync(0, "utf8");
-process.stdout.write(JSON.stringify(parseEnv(content)));
-`;
-
-function parseWithNode(content: string): Record<string, string> {
-  const process = Bun.spawnSync(
-    ["node", "-e", nodeParseEnvScript],
-    {
-      stdin: new TextEncoder().encode(content),
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-  );
-  if (process.exitCode !== 0) {
-    throw new Error(
-      `Node parseEnv failed: ${process.stderr.toString().trim()}`,
-    );
-  }
-  return JSON.parse(process.stdout.toString());
+function parseEnvironment(content: string) {
+  return parseEnv(content);
 }
 
 function run(
@@ -398,7 +378,7 @@ describe("built CLI response request", () => {
     expect(result.stdout + result.stderr).not.toContain("highly-secret");
     const content = await readFile(target, "utf8");
     expect(content).toBe('API_TOKEN="highly-secret"\n');
-    expect(parseWithNode(content).API_TOKEN).toBe("highly-secret");
+    expect(parseEnvironment(content).API_TOKEN).toBe("highly-secret");
   });
 
   test("set_env preserves assignment prefixes and the target line style", async () => {
@@ -489,7 +469,7 @@ describe("built CLI response request", () => {
     }
   });
 
-  test("set_env chooses the first lossless Node dotenv representation", async () => {
+  test("set_env chooses the first lossless portable dotenv representation", async () => {
     const cases = [
       {
         name: "double",
@@ -499,7 +479,7 @@ describe("built CLI response request", () => {
       {
         name: "node-backslash",
         value: String.raw`literal\rsequence`,
-        assignment: String.raw`API_TOKEN="literal\rsequence"` + "\n",
+        assignment: String.raw`API_TOKEN='literal\rsequence'` + "\n",
       },
       {
         name: "node-backslash-n",
@@ -509,7 +489,7 @@ describe("built CLI response request", () => {
       {
         name: "unmatched-leading-quote",
         value: '"abc\'#hash',
-        assignment: 'API_TOKEN="abc\'#hash\n',
+        assignment: 'API_TOKEN=`"abc\'#hash`\n',
       },
       {
         name: "single",
@@ -519,12 +499,12 @@ describe("built CLI response request", () => {
       {
         name: "unquoted",
         value: 'both"quotes\'stay',
-        assignment: 'API_TOKEN=both"quotes\'stay\n',
+        assignment: 'API_TOKEN=`both"quotes\'stay`\n',
       },
       {
         name: "unquoted-non-ascii-whitespace",
         value: ' both"quotes\'stay ',
-        assignment: 'API_TOKEN= both"quotes\'stay \n',
+        assignment: 'API_TOKEN=` both"quotes\'stay `\n',
       },
     ];
 
@@ -540,7 +520,7 @@ describe("built CLI response request", () => {
       expect(result.code).toBe(0);
       const content = await readFile(target, "utf8");
       expect(content).toBe(testCase.assignment);
-      expect(parseWithNode(content).API_TOKEN).toBe(testCase.value);
+      expect(parseEnvironment(content).API_TOKEN).toBe(testCase.value);
     }
   });
 
@@ -638,10 +618,27 @@ describe("built CLI response request", () => {
     }
   });
 
-  test("set_env fails unchanged when no lossless representation exists", async () => {
-    const target = join(directory, "unrepresentable.env");
+  test("set_env uses backticks when a value contains both quote styles", async () => {
+    const target = join(directory, "backtick-representation.env");
     await writeFile(target, "API_TOKEN=old\n");
     const value = ' leading "double" and \'single\' # trailing ';
+
+    const result = run(["request", "-"], {
+      stdin: setEnvRequest(target),
+      secret: value,
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.stdout + result.stderr).not.toContain(value);
+    const content = await readFile(target, "utf8");
+    expect(content).toBe('API_TOKEN=` leading "double" and \'single\' # trailing `\n');
+    expect(parseEnvironment(content).API_TOKEN).toBe(value);
+  });
+
+  test("set_env fails unchanged when no closed representation exists", async () => {
+    const target = join(directory, "unrepresentable.env");
+    await writeFile(target, "API_TOKEN=old\n");
+    const value = ' leading "double", \'single\', and `backtick` # trailing ';
 
     const result = run(["request", "-"], {
       stdin: setEnvRequest(target),
@@ -875,7 +872,7 @@ describe("built CLI response request", () => {
 
       expect(result.code).toBe(0);
       const content = await readFile(target, "utf8");
-      expect(parseWithNode(content)[testCase.key]).toBe(testCase.value);
+      expect(parseEnvironment(content)[testCase.key]).toBe(testCase.value);
     }
   });
 
@@ -898,7 +895,7 @@ describe("built CLI response request", () => {
 
     expect(result.code).toBe(0);
     expect(JSON.parse(result.stdout).values.features).toEqual([]);
-    expect(parseWithNode(await readFile(target, "utf8")).FEATURES).toBe("[]");
+    expect(parseEnvironment(await readFile(target, "utf8")).FEATURES).toBe("[]");
   });
 
   test("different set_env keys stay ordered with existing operations", async () => {
@@ -1002,7 +999,7 @@ describe("built CLI response request", () => {
     expect(await readFile(second, "utf8")).toBe("");
   });
 
-  test("a later set_env cannot close an earlier unquoted fallback", async () => {
+  test("a closed backtick assignment allows a later set_env", async () => {
     const target = join(directory, "set-env-unmatched-quote.env");
     await writeFile(target, "");
     const input = withDeliveries(target, [
@@ -1028,12 +1025,12 @@ describe("built CLI response request", () => {
       secret,
     });
 
-    expect(result.code).toBe(1);
-    expect(JSON.parse(result.stdout).failedDeliveries).toEqual(["second"]);
+    expect(result.code).toBe(0);
     expect(result.stdout + result.stderr).not.toContain(secret);
     const content = await readFile(target, "utf8");
-    expect(content).toBe(`FIRST=${secret}\n`);
-    expect(parseWithNode(content).FIRST).toBe(secret);
+    expect(content).toBe(`FIRST=\`${secret}\`\nSECOND="prod"\n`);
+    expect(parseEnvironment(content).FIRST).toBe(secret);
+    expect(parseEnvironment(content).SECOND).toBe("prod");
   });
 
   test("a later template delivery cannot invalidate set_env", async () => {
@@ -1063,12 +1060,11 @@ describe("built CLI response request", () => {
         secret,
       });
 
-      expect(result.code).toBe(1);
-      expect(JSON.parse(result.stdout).failedDeliveries).toEqual(["second"]);
+      expect(result.code).toBe(0);
       expect(result.stdout + result.stderr).not.toContain(secret);
       const content = await readFile(target, "utf8");
-      expect(content).toBe(`FIRST=${secret}\n`);
-      expect(parseWithNode(content).FIRST).toBe(secret);
+      expect(content).toBe(`FIRST=\`${secret}\`\n# "prod"\n`);
+      expect(parseEnvironment(content).FIRST).toBe(secret);
     }
 
     const target = join(directory, "set-env-before-hardlink.env");
@@ -1096,9 +1092,8 @@ describe("built CLI response request", () => {
       secret,
     });
 
-    expect(result.code).toBe(1);
-    expect(JSON.parse(result.stdout).failedDeliveries).toEqual(["second"]);
-    expect(await readFile(target, "utf8")).toBe(`FIRST=${secret}\n`);
+    expect(result.code).toBe(0);
+    expect(await readFile(target, "utf8")).toBe(`FIRST=\`${secret}\`\n# "prod"\n`);
 
     const duplicateTarget = join(directory, "set-env-before-duplicate.env");
     await writeFile(duplicateTarget, "");
@@ -1159,7 +1154,7 @@ describe("built CLI response request", () => {
       "second",
     ]);
     expect(await readFile(joinedTarget, "utf8")).toBe(
-      `FIRST=${joinedSecret}`,
+      `FIRST=\`${joinedSecret}\``,
     );
   });
 

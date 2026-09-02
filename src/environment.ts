@@ -119,22 +119,23 @@ function activeAssignments(
 
 function serialize(value: string): string {
   // Submission validation rejects physical line breaks before delivery.
-  // Node expands a literal \n sequence only inside double quotes.
-  if (!value.includes('"') && !value.includes(String.raw`\n`)) {
+  // Bun expands literal \n and \r sequences inside double quotes. Keep emitted
+  // assignments lossless across Bun's and Node's dotenv parsers.
+  if (
+    !value.includes('"') &&
+    !value.includes(String.raw`\n`) &&
+    !value.includes(String.raw`\r`)
+  ) {
     return `"${value}"`;
   }
   if (!value.includes("'")) return `'${value}'`;
-  if (!/^[\t ]|[\t ]$/.test(value)) {
-    const openingQuote = ['"', "'", "`"].includes(value[0]!)
-      ? value[0]
-      : undefined;
-    if (
-      openingQuote
-        ? value.indexOf(openingQuote, 1) < 0
-        : !value.includes("#")
-    ) {
-      return value;
-    }
+  if (!value.includes("`")) return `\`${value}\``;
+  if (
+    !/^[\t ]|[\t ]$/.test(value) &&
+    !['"', "'", "`"].includes(value[0]!) &&
+    !value.includes("#")
+  ) {
+    return value;
   }
   throw new Error("value cannot be represented losslessly");
 }
