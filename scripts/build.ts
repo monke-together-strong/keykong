@@ -33,6 +33,8 @@ const build = Bun.spawnSync(
     "bun",
     "build",
     "--compile",
+    "--no-compile-autoload-dotenv",
+    "--no-compile-autoload-bunfig",
     "--define",
     `KEY_KONG_TESTING=${testing}`,
     "--outfile",
