@@ -1,15 +1,8 @@
-import {
-  readdirSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-} from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const artifactDirectory = join(root, ".build", "bun");
 const defaultOutput = join(root, "dist", "bin", "keykong");
 const arguments_ = process.argv.slice(2);
 const testing = arguments_.includes("--testing");
@@ -26,55 +19,26 @@ if (arguments_.length !== expectedArguments || !output) {
   process.exit(2);
 }
 
-await mkdir(artifactDirectory, { recursive: true });
+await mkdir(dirname(output), { recursive: true });
 
-const build = Bun.spawnSync(
-  [
-    "bun",
-    "build",
-    "--compile",
-    "--no-compile-autoload-dotenv",
-    "--no-compile-autoload-bunfig",
-    "--define",
-    `KEY_KONG_TESTING=${testing}`,
-    "--outfile",
-    output,
+const build = await Bun.build({
+  compile: {
+    autoloadBunfig: false,
+    autoloadDotenv: false,
+    outfile: output,
+  },
+  define: {
+    KEY_KONG_TESTING: String(testing),
+  },
+  entrypoints: [
     join(root, "src", "main.ts"),
     join(root, "src", "delivery-worker.ts"),
   ],
-  {
-    cwd: artifactDirectory,
-    stdin: "inherit",
-    stdout: "inherit",
-    stderr: "inherit",
-  },
-);
+});
 
-const artifactFiles = [root, artifactDirectory].flatMap((directory) =>
-  readdirSync(directory, { withFileTypes: true })
-    .filter(
-      (entry) =>
-        entry.isFile() &&
-        entry.name.startsWith(".") &&
-        entry.name.endsWith(".bun-build"),
-    )
-    .map((entry) => {
-      const path = join(directory, entry.name);
-      return { directory, name: entry.name, path, changed: statSync(path).mtimeMs };
-    })
-);
-
-artifactFiles.sort(
-  (left, right) =>
-    right.changed - left.changed || right.name.localeCompare(left.name),
-);
-
-for (const [index, artifact] of artifactFiles.entries()) {
-  if (index >= 3) {
-    unlinkSync(artifact.path);
-  } else if (artifact.directory !== artifactDirectory) {
-    renameSync(artifact.path, join(artifactDirectory, artifact.name));
+if (!build.success) {
+  for (const log of build.logs) {
+    console.error(log.message);
   }
+  process.exit(1);
 }
-
-process.exit(build.exitCode);
