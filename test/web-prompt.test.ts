@@ -316,6 +316,7 @@ test("a request reports a taken port, and prompt web moves off it", async () => 
   try {
     const request = keykong(["request", file], { KEY_KONG_TEST_DEADLINE_MS: "500" });
     expect(request.code).toBe(1);
+    expect(JSON.parse(request.stdout).status).toBe("expired");
     expect(request.stderr).toContain(`keykong: port ${port} is in use; waiting for it\n`);
     expect(await configureWeb()).not.toBe(port);
   } finally {
