@@ -44,8 +44,9 @@ export async function promptCommand(
       readWebPromptSettings().then(Boolean, () => true),
     );
     // Check Tailscale itself so an interrupted switch can be finished. Without
-    // settings or a tailscale binary, there is no switch to finish.
-    if ((configured || Bun.which("tailscale")) && (await mounted(deadline))) {
+    // settings, native is already selected, so the check is best-effort.
+    const mount = mounted(deadline);
+    if (await (configured ? mount : mount.catch(() => false))) {
       await tailscale(
         ["serve", "--https=443", "--set-path", mountPath, "off"],
         deadline,

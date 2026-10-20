@@ -361,11 +361,16 @@ test("prompt native removes only this node's HTTPS mount", async () => {
 });
 
 test("prompt native needs Tailscale only once web settings exist", async () => {
-  const missing = { PATH: join(directory, "missing") };
-  expect(keykong(["prompt", "native"], missing).stdout).toBe('{"prompt":"native"}\n');
+  const down = join(directory, "down");
+  await mkdir(down);
+  await writeFile(join(down, "tailscale"), "#!/bin/sh\necho 'daemon is not running' >&2\nexit 1\n");
+  await chmod(join(down, "tailscale"), 0o700);
+  expect(keykong(["prompt", "native"], { PATH: down }).stdout).toBe('{"prompt":"native"}\n');
+  expect(keykong(["prompt", "native"], { PATH: join(directory, "missing") }).stdout)
+    .toBe('{"prompt":"native"}\n');
   await configureWeb();
 
-  const native = keykong(["prompt", "native"], missing);
+  const native = keykong(["prompt", "native"], { PATH: down });
 
   expect(native.code).toBe(1);
   expect(JSON.parse(native.stdout).error.code).toBe("PROMPT_FAILED");
