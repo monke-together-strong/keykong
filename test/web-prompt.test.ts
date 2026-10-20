@@ -293,15 +293,28 @@ test("a stalled browser submission cannot delay an accepted one", async () => {
   await stalled;
 });
 
-test("prompt web moves off a port another program took", async () => {
+test("a request reports a taken port, and prompt web moves off it", async () => {
   const port = await configureWeb();
   const squatter = Bun.serve({
     hostname: "127.0.0.1",
     port,
     fetch: () => new Response(),
   });
+  const file = join(directory, "request.json");
+  await writeFile(
+    file,
+    JSON.stringify({
+      id: "configure",
+      title: "Configure",
+      fields: [{ id: "environment", label: "Environment", type: "text" }],
+      deliveries: [],
+    }),
+  );
 
   try {
+    const request = keykong(["request", file], { KEY_KONG_TEST_DEADLINE_MS: "500" });
+    expect(request.code).toBe(1);
+    expect(request.stderr).toContain(`keykong: port ${port} is in use; waiting for it\n`);
     expect(await configureWeb()).not.toBe(port);
   } finally {
     squatter.stop(true);
@@ -344,10 +357,12 @@ test("prompt native removes only this node's HTTPS mount", async () => {
   expect(keykong(["prompt"]).stdout).toBe('{"prompt":"native"}\n');
 });
 
-test("prompt native stays on web when it cannot check Tailscale", async () => {
+test("prompt native needs Tailscale only once web settings exist", async () => {
+  const missing = { PATH: join(directory, "missing") };
+  expect(keykong(["prompt", "native"], missing).stdout).toBe('{"prompt":"native"}\n');
   await configureWeb();
 
-  const native = keykong(["prompt", "native"], { PATH: join(directory, "missing") });
+  const native = keykong(["prompt", "native"], missing);
 
   expect(native.code).toBe(1);
   expect(JSON.parse(native.stdout).error.code).toBe("PROMPT_FAILED");

@@ -149,7 +149,7 @@ async function listen(
   deadline: Deadline,
   fetch: (request: globalThis.Request) => Promise<Response>,
 ): Promise<Bun.Server<undefined>> {
-  while (true) {
+  for (let attempt = 0; ; attempt++) {
     try {
       return Bun.serve({
         hostname: "127.0.0.1",
@@ -166,7 +166,12 @@ async function listen(
         );
       }
     }
-    // Another request owns the port until it finishes.
+    if (attempt === 0) {
+      await deadline.run(
+        Bun.write(Bun.stderr, `keykong: port ${port} is in use; waiting for it\n`),
+      );
+    }
+    // Another request usually owns the port until it finishes.
     await deadline.run(Bun.sleep(250));
   }
 }
