@@ -48,9 +48,9 @@ function tailscaleStatus({ tags }: { tags?: string[] }) {
   });
 }
 
-function keykong(args: string[]) {
+function keykong(args: string[], overrides: Record<string, string> = {}) {
   const result = Bun.spawnSync([cli, ...args], {
-    env,
+    env: { ...env, ...overrides },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -327,4 +327,14 @@ test("prompt native removes only this node's HTTPS mount", async () => {
   expect(keykong(["prompt", "native"]).stdout).toBe('{"prompt":"native"}\n');
   expect((await tailscaleCalls()).at(-1)).toBe(removal);
   expect(keykong(["prompt"]).stdout).toBe('{"prompt":"native"}\n');
+});
+
+test("prompt native stays on web when it cannot check Tailscale", async () => {
+  await configureWeb();
+
+  const native = keykong(["prompt", "native"], { PATH: join(directory, "missing") });
+
+  expect(native.code).toBe(1);
+  expect(JSON.parse(native.stdout).error.code).toBe("PROMPT_FAILED");
+  expect(JSON.parse(keykong(["prompt"]).stdout).prompt).toBe("web");
 });

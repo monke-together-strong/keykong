@@ -41,7 +41,7 @@ export async function promptCommand(
   }
   if (args.length === 2 && args[1] === "native") {
     // Check Tailscale itself so an interrupted switch can be finished.
-    if (Bun.which("tailscale") && (await mounted(deadline))) {
+    if (await mounted(deadline)) {
       await tailscale(
         ["serve", "--https=443", "--set-path", mountPath, "off"],
         deadline,
