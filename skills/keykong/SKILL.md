@@ -70,6 +70,10 @@ writable regular file at an absolute path.
 
 ## 3. Invoke and handle the result
 
+Run `keykong prompt` first. When it reports `"prompt":"web"`, tell the user to
+open its `url` before invoking: the request blocks until they submit, and that
+URL leads to the waiting request.
+
 Pass the JSON Request by file or explicit standard input:
 
 ```sh

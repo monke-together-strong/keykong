@@ -3,13 +3,13 @@ import { DeadlineExpired, type Deadline } from "./deadline";
 import { deliver } from "./delivery";
 import { requestLimits } from "./limits";
 import { prompt } from "./prompt";
-import type { Result } from "./types";
+import type { PromptSelection, Result } from "./types";
 import { validateRequest, validateSubmission } from "./validation";
 
 declare const KEY_KONG_TESTING: boolean;
 
 export interface Execution {
-  result: Result;
+  result: Result | PromptSelection;
   exitCode: 0 | 1 | 2;
 }
 

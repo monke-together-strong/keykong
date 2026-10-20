@@ -2,6 +2,7 @@ import { dirname, resolve } from "node:path";
 import { DeadlineExpired, type Deadline } from "./deadline";
 import { KeyKongError } from "./errors";
 import type { PromptRequest, PromptResponse, Request } from "./types";
+import { readWebPromptSettings, webPrompt } from "./web-prompt";
 
 declare const KEY_KONG_TESTING: boolean;
 
@@ -16,6 +17,16 @@ function helperPath(): string {
 }
 
 export async function prompt(
+  request: Request,
+  deadline: Deadline,
+): Promise<PromptResponse> {
+  const settings = await readWebPromptSettings();
+  return settings
+    ? await webPrompt(request, settings, deadline)
+    : await nativePrompt(request, deadline);
+}
+
+async function nativePrompt(
   request: Request,
   deadline: Deadline,
 ): Promise<PromptResponse> {

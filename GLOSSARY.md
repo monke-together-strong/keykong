@@ -32,6 +32,12 @@ values to the broker. It may receive delivery metadata for display, but never
 resolves or writes to sinks.
 _Avoid_: Input adapter, provider, broker, native adapter
 
+**Web Prompt**:
+The Prompt Adapter that serves a request's form from the Broker process while
+the request waits, reached through Tailscale Serve by one allowed Tailscale
+login.
+_Avoid_: Web host, prompt server, LFV adapter
+
 **Delivery Specification**:
 A request's description of its intended sink and the permitted operation that will deliver submitted values there.
 _Avoid_: Sink configuration, delivery template
