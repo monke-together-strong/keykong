@@ -20,7 +20,7 @@ export async function prompt(
   request: Request,
   deadline: Deadline,
 ): Promise<PromptResponse> {
-  const settings = await readWebPromptSettings();
+  const settings = await deadline.run(readWebPromptSettings());
   return settings
     ? await webPrompt(request, settings, deadline)
     : await nativePrompt(request, deadline);

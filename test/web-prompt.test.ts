@@ -43,7 +43,8 @@ function tailscaleStatus({ tags }: { tags?: string[] }) {
       UserID: 7,
       ...(tags ? { Tags: tags } : {}),
     },
-    User: { "7": { LoginName: tags ? "tagged-devices" : owner } },
+    // Tailscale reports no user profiles for a tagged node without user peers.
+    User: tags ? null : { "7": { LoginName: owner } },
   });
 }
 
@@ -262,22 +263,32 @@ test("a field named action is a value, not a page control", async () => {
   );
 });
 
-test("a stalled browser submission cannot hold the request past its deadline", async () => {
+test("a stalled browser submission cannot delay an accepted one", async () => {
   const port = await configureWeb();
-  const target = join(directory, "app.env");
-  await writeFile(target, "");
-  const { process, url } = await startRequest(target, { deadlineMS: 1_500 });
-  const stalled = browser(`http://127.0.0.1:${port}/${url.split("/").at(-1)}`, {
+  const { process, url } = await startRequest(join(directory, "app.env"), {
+    fields: [{ id: "environment", label: "Environment", type: "text" }],
+    deadlineMS: 2_000,
+  });
+  const page = `http://127.0.0.1:${port}/${url.split("/").at(-1)}`;
+  const stalled = browser(page, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new ReadableStream({
       start: (controller) => controller.enqueue(new TextEncoder().encode("environment=")),
     }),
   }).catch(() => undefined);
+  // Submit with well under a second of the request deadline left.
+  await Bun.sleep(1_100);
 
-  expect(await process.exited).toBe(1);
+  const submitted = await browser(page, {
+    method: "POST",
+    body: new URLSearchParams([["environment", "prod"], ["_action", "submit"]]),
+  });
+
+  expect(await submitted.text()).toContain("Submitted.");
+  expect(await process.exited).toBe(0);
   expect(await new Response(process.stdout).text()).toBe(
-    '{"status":"expired","values":{}}\n',
+    '{"status":"completed","values":{"environment":"prod"}}\n',
   );
   await stalled;
 });
@@ -297,20 +308,23 @@ test("invalid settings are reported until a prompt switch replaces them", async 
   expect(keykong(["prompt"]).stdout).toBe('{"prompt":"native"}\n');
 });
 
-test("prompt native removes the Tailscale mount", async () => {
+test("prompt native removes only this node's HTTPS mount", async () => {
+  const serveStatus = (listener: string) =>
+    writeFile(
+      join(directory, "serve-status.json"),
+      JSON.stringify({ Web: { [listener]: { Handlers: { "/keykong": {} } } } }),
+    );
+  const removal = "serve --https=443 --set-path /keykong off";
   await configureWeb();
-  await writeFile(
-    join(directory, "serve-status.json"),
-    JSON.stringify({
-      Web: { "wukong.example.ts.net:443": { Handlers: { "/keykong": {} } } },
-    }),
-  );
+  await serveStatus("wukong.example.ts.net:8443");
 
-  const native = keykong(["prompt", "native"]);
+  expect(keykong(["prompt", "native"]).stdout).toBe('{"prompt":"native"}\n');
+  expect(await tailscaleCalls()).not.toContain(removal);
 
-  expect(native.stdout).toBe('{"prompt":"native"}\n');
-  expect((await tailscaleCalls()).at(-1)).toBe(
-    "serve --https=443 --set-path /keykong off",
-  );
+  await configureWeb();
+  await serveStatus("wukong.example.ts.net:443");
+
+  expect(keykong(["prompt", "native"]).stdout).toBe('{"prompt":"native"}\n');
+  expect((await tailscaleCalls()).at(-1)).toBe(removal);
   expect(keykong(["prompt"]).stdout).toBe('{"prompt":"native"}\n');
 });

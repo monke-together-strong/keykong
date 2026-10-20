@@ -14,10 +14,14 @@ import type {
 } from "./types";
 import { validateSubmission } from "./validation";
 
+export const mountPath = "/keykong";
+
 const settingsSchema = z.object({
-  url: z.url({ protocol: /^https$/ }),
+  url: z
+    .url({ protocol: /^https$/ })
+    .regex(new RegExp(`^https://[^/?#\\s]+${mountPath}$`)),
   port: z.int().min(1).max(65_535),
-  allow: z.string().min(1),
+  allow: z.string().trim().min(1),
 });
 
 export type WebPromptSettings = z.infer<typeof settingsSchema>;
@@ -50,8 +54,12 @@ export async function readWebPromptSettings(): Promise<
 
 export async function writeWebPromptSettings(settings: WebPromptSettings) {
   const temporary = `${settingsPath()}.${process.pid}.next`;
-  await Bun.write(temporary, `${JSON.stringify(settings)}\n`);
-  await rename(temporary, settingsPath());
+  try {
+    await Bun.write(temporary, `${JSON.stringify(settings)}\n`);
+    await rename(temporary, settingsPath());
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 export async function removeWebPromptSettings() {
@@ -65,6 +73,7 @@ export async function webPrompt(
 ): Promise<PromptResponse> {
   const id = randomBytes(16).toString("base64url");
   const url = `${settings.url}/${id}`;
+  const origin = new URL(settings.url).origin;
   const { promise, resolve } = Promise.withResolvers<PromptResponse>();
   let finished = false;
   const finish = (response: PromptResponse) => {
@@ -85,7 +94,7 @@ export async function webPrompt(
     if (incoming.method === "GET") return page(200, form(request));
     if (
       incoming.method !== "POST" ||
-      incoming.headers.get("origin") !== new URL(settings.url).origin
+      incoming.headers.get("origin") !== origin
     ) {
       return page(403, "<p>This submission was rejected.</p>");
     }
@@ -129,12 +138,9 @@ export async function webPrompt(
     return await deadline.run(promise);
   } finally {
     finished = true;
-    // Let the acknowledgement flush without outliving the deadline.
-    await Promise.race([
-      server.stop(),
-      Bun.sleep(Math.min(1_000, deadline.remaining())),
-    ]);
-    await server.stop(true);
+    // Stop listening without waiting on in-flight uploads, which would delay
+    // delivery; they end when the process exits.
+    void server.stop();
   }
 }
 
