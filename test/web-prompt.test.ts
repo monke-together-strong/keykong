@@ -77,6 +77,8 @@ test("prompt web mounts Key Kong under the node's Tailscale HTTPS URL", async ()
   expect(calls[1]).toMatch(
     /^serve --bg --yes --https=443 --set-path \/keykong http:\/\/127\.0\.0\.1:\d+$/,
   );
+  // Outside the ephemeral range other programs are assigned from.
+  expect(Number(calls[1]!.split(":").at(-1))).toBeLessThan(32_768);
   expect(keykong(["prompt"]).stdout).toBe(configured.stdout);
 });
 

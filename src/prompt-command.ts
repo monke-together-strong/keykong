@@ -131,15 +131,18 @@ async function tailscaleJSON<Schema extends z.ZodType>(
   return parsed.data;
 }
 
+// Pick below the ephemeral ranges (Linux 32768+, macOS 49152+), so programs
+// that let the system choose a port cannot land on Key Kong's while it is idle.
 function freePort(): number {
-  const server = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    fetch: () => new Response(),
-  });
-  const port = server.port!;
-  server.stop(true);
-  return port;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const port = 20_000 + Math.floor(Math.random() * 12_768);
+    try {
+      Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response() })
+        .stop(true);
+      return port;
+    } catch {}
+  }
+  throw new KeyKongError("PROMPT_FAILED", "no free port for the web prompt", 1);
 }
 
 async function tailscale(args: string[], deadline: Deadline): Promise<string> {
