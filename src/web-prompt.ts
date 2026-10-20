@@ -218,7 +218,8 @@ function page(status: number, body: string): Response {
         "Content-Security-Policy":
           "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
         "Content-Type": "text/html; charset=utf-8",
-        "Referrer-Policy": "no-referrer",
+        // Browsers send `Origin: null` with form posts under `no-referrer`.
+        "Referrer-Policy": "same-origin",
       },
     },
   );
