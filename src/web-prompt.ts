@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, rm } from "node:fs/promises";
+import { rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import { z } from "zod";
 import type { Deadline } from "./deadline";
 import { KeyKongError } from "./errors";
 import { requestLimits } from "./limits";
@@ -13,11 +14,16 @@ import type {
 } from "./types";
 import { validateSubmission } from "./validation";
 
-export interface WebPromptSettings {
-  url: string;
-  port: number;
-  allow: string;
-}
+const settingsSchema = z.object({
+  url: z.url({ protocol: /^https$/ }),
+  port: z.int().min(1).max(65_535),
+  allow: z.string().min(1),
+});
+
+export type WebPromptSettings = z.infer<typeof settingsSchema>;
+
+// Field IDs cannot start with "_", so this never collides with a field.
+const control = "_action";
 
 function settingsPath(): string {
   const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
@@ -29,26 +35,23 @@ export async function readWebPromptSettings(): Promise<
 > {
   const file = Bun.file(settingsPath());
   if (!(await file.exists())) return undefined;
-  try {
-    const value = await file.json();
-    if (
-      typeof value.url === "string" &&
-      Number.isInteger(value.port) &&
-      typeof value.allow === "string"
-    ) {
-      return { url: value.url, port: value.port, allow: value.allow };
-    }
-  } catch {}
-  throw new KeyKongError(
-    "PROMPT_FAILED",
-    `web prompt settings are invalid: ${settingsPath()}`,
-    1,
+  const settings = settingsSchema.safeParse(
+    await file.json().catch(() => undefined),
   );
+  if (!settings.success) {
+    throw new KeyKongError(
+      "PROMPT_FAILED",
+      `web prompt settings in ${settingsPath()} are invalid; run keykong prompt web or keykong prompt native`,
+      1,
+    );
+  }
+  return settings.data;
 }
 
 export async function writeWebPromptSettings(settings: WebPromptSettings) {
-  await mkdir(dirname(settingsPath()), { recursive: true });
-  await Bun.write(settingsPath(), `${JSON.stringify(settings)}\n`);
+  const temporary = `${settingsPath()}.${process.pid}.next`;
+  await Bun.write(temporary, `${JSON.stringify(settings)}\n`);
+  await rename(temporary, settingsPath());
 }
 
 export async function removeWebPromptSettings() {
@@ -68,6 +71,7 @@ export async function webPrompt(
     finished = true;
     resolve(response);
   };
+  const ended = () => page(410, "<p>This Key Kong request has ended.</p>");
 
   const server = await listen(settings.port, deadline, async (incoming) => {
     if (incoming.headers.get("tailscale-user-login") !== settings.allow) {
@@ -77,9 +81,7 @@ export async function webPrompt(
     if (path === "/" && !finished) {
       return new Response(null, { status: 303, headers: { Location: url } });
     }
-    if (path !== `/${id}` || finished) {
-      return page(410, "<p>This Key Kong request has ended.</p>");
-    }
+    if (path !== `/${id}` || finished) return ended();
     if (incoming.method === "GET") return page(200, form(request));
     if (
       incoming.method !== "POST" ||
@@ -89,42 +91,50 @@ export async function webPrompt(
     }
 
     const submitted = await incoming.formData().catch(() => undefined);
+    if (finished) return ended();
     if (!submitted) {
       return page(400, form(request, "The submission could not be read."));
     }
-    if (finished) return page(410, "<p>This Key Kong request has ended.</p>");
-    if (submitted.get("action") === "cancel") {
+    if (submitted.get(control) === "cancel") {
       finish({ status: "cancelled" });
       return page(200, "<p>Cancelled. You can close this tab.</p>");
     }
-    const values = Object.fromEntries(
-      request.fields.map((field) => [
-        field.id,
-        field.type === "multi_select"
-          ? submitted.getAll(field.id)
-          : submitted.get(field.id),
-      ]),
-    );
+    let values: Record<string, ResponseValue>;
     try {
-      validateSubmission(values, request);
+      values = validateSubmission(
+        Object.fromEntries(
+          request.fields.map((field) => [
+            field.id,
+            field.type === "multi_select"
+              ? submitted.getAll(field.id)
+              : submitted.get(field.id),
+          ]),
+        ),
+        request,
+      );
     } catch {
       return page(
         422,
         form(request, "Every field needs a value on a single line."),
       );
     }
-    finish({
-      status: "submitted",
-      values: values as Record<string, ResponseValue>,
-    });
+    finish({ status: "submitted", values });
     return page(200, "<p>Submitted. You can close this tab.</p>");
   });
 
-  await Bun.write(Bun.stderr, `keykong: waiting for input at ${url}\n`);
   try {
+    await deadline.run(
+      Bun.write(Bun.stderr, `keykong: waiting for input at ${url}\n`),
+    );
     return await deadline.run(promise);
   } finally {
-    await server.stop();
+    finished = true;
+    // Let the acknowledgement flush without outliving the deadline.
+    await Promise.race([
+      server.stop(),
+      Bun.sleep(Math.min(1_000, deadline.remaining())),
+    ]);
+    await server.stop(true);
   }
 }
 
@@ -157,19 +167,19 @@ async function listen(
 
 function form(request: Request, error?: string): string {
   const fields = request.fields.map((field) => {
-    const name = escape(field.id);
-    const label = escape(field.label);
+    const name = Bun.escapeHTML(field.id);
+    const label = Bun.escapeHTML(field.label);
     if (field.type === "multi_select") {
       const options = field.options!.map((option) =>
         `<label class="option"><input type="checkbox" name="${name}" value="${
-          escape(option.value)
-        }"> ${escape(option.label)}</label>`
+          Bun.escapeHTML(option.value)
+        }"> ${Bun.escapeHTML(option.label)}</label>`
       );
       return `<fieldset><legend>${label}</legend>${options.join("")}</fieldset>`;
     }
     if (field.type === "select") {
       const options = field.options!.map((option) =>
-        `<option value="${escape(option.value)}">${escape(option.label)}</option>`
+        `<option value="${Bun.escapeHTML(option.value)}">${Bun.escapeHTML(option.label)}</option>`
       );
       return `<label>${label}<select name="${name}" required>` +
         `<option value="" disabled selected hidden>Choose…</option>${
@@ -185,22 +195,22 @@ function form(request: Request, error?: string): string {
     request.deliveries.map((delivery) => `<li>${describe(delivery)}</li>`)
       .join("")
   }</ul></section>`;
-  return `<form method="post"><h1>${escape(request.title)}</h1>${
-    error ? `<p role="alert">${escape(error)}</p>` : ""
+  return `<form method="post"><h1>${Bun.escapeHTML(request.title)}</h1>${
+    error ? `<p role="alert">${Bun.escapeHTML(error)}</p>` : ""
   }${fields.join("")}${deliveries}<div class="actions">` +
-    `<button name="action" value="submit">Submit</button>` +
-    `<button name="action" value="cancel" formnovalidate>Cancel</button>` +
+    `<button name="${control}" value="submit">Submit</button>` +
+    `<button name="${control}" value="cancel" formnovalidate>Cancel</button>` +
     `</div></form>`;
 }
 
 function describe(delivery: Delivery): string {
-  const path = `<code>${escape(delivery.path)}</code>`;
+  const path = `<code>${Bun.escapeHTML(delivery.path)}</code>`;
   if (delivery.operation === "set_env") {
-    return `Set <code>${escape(delivery.key)}</code> in ${path} from ${
-      escape(delivery.field)
+    return `Set <code>${Bun.escapeHTML(delivery.key)}</code> in ${path} from ${
+      Bun.escapeHTML(delivery.field)
     }`;
   }
-  const template = `<code>${escape(delivery.template)}</code>`;
+  const template = `<code>${Bun.escapeHTML(delivery.template)}</code>`;
   return delivery.operation === "insert_line"
     ? `Insert at line ${delivery.line} of ${path}: ${template}`
     : `Append to ${path}: ${template}`;
@@ -225,17 +235,6 @@ function page(status: number, body: string): Response {
   );
 }
 
-const entities: Record<string, string> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;",
-};
-
-function escape(text: string): string {
-  return text.replace(/[&<>"']/g, (character) => entities[character]!);
-}
 
 const style = `
 :root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }

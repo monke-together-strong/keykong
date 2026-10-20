@@ -16,10 +16,13 @@ beforeEach(async () => {
   await mkdir(bin);
   tailscaleLog = join(directory, "tailscale.log");
   await writeFile(join(directory, "status.json"), tailscaleStatus({}));
+  await writeFile(join(directory, "serve-status.json"), "{}");
   await writeFile(
     join(bin, "tailscale"),
     `#!/bin/sh\nprintf '%s\\n' "$*" >> "${tailscaleLog}"\n` +
-      `[ "$1" = status ] && cat "${join(directory, "status.json")}"\nexit 0\n`,
+      `[ "$1" = status ] && cat "${join(directory, "status.json")}"\n` +
+      `[ "$1 $2" = "serve status" ] && cat "${join(directory, "serve-status.json")}"\n` +
+      `exit 0\n`,
   );
   await chmod(join(bin, "tailscale"), 0o700);
   env = {
@@ -84,14 +87,17 @@ async function configureWeb() {
   return Number(serve.match(/127\.0\.0\.1:(\d+)$/)![1]);
 }
 
-async function startRequest(target: string) {
+async function startRequest(
+  target: string,
+  { fields, deadlineMS }: { fields?: object[]; deadlineMS?: number } = {},
+) {
   const file = join(directory, "request.json");
   await writeFile(
     file,
     JSON.stringify({
       id: "configure",
       title: "Configure <service>",
-      fields: [
+      fields: fields ?? [
         { id: "environment", label: "Environment", type: "text" },
         { id: "api_token", label: "API token", type: "secret" },
         {
@@ -110,7 +116,7 @@ async function startRequest(target: string) {
           ],
         },
       ],
-      deliveries: [
+      deliveries: fields ? [] : [
         {
           id: "token",
           path: target,
@@ -122,7 +128,9 @@ async function startRequest(target: string) {
     }),
   );
   const process = Bun.spawn([cli, "request", file], {
-    env,
+    env: deadlineMS
+      ? { ...env, KEY_KONG_TEST_DEADLINE_MS: String(deadlineMS) }
+      : env,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -172,6 +180,7 @@ test("the allowed Tailscale user completes a web request from its page", async (
       ["api_token", "highly-secret"],
       ["region", "us-west-2"],
       ["features", "alerts"],
+      ["_action", "submit"],
     ]),
   });
 
@@ -193,7 +202,7 @@ test("other tailnet users are refused and cancelling delivers nothing", async ()
   expect((await browser(local, {}, "intruder@example.com")).status).toBe(403);
   const cancelled = await browser(local, {
     method: "POST",
-    body: new URLSearchParams([["action", "cancel"]]),
+    body: new URLSearchParams([["_action", "cancel"]]),
   });
 
   expect(cancelled.status).toBe(200);
@@ -208,7 +217,7 @@ test("a page from an earlier request cannot answer the next one", async () => {
   const port = await configureWeb();
   const target = join(directory, "app.env");
   await writeFile(target, "");
-  const cancel = { method: "POST", body: new URLSearchParams([["action", "cancel"]]) };
+  const cancel = { method: "POST", body: new URLSearchParams([["_action", "cancel"]]) };
   const earlier = await startRequest(target);
   const earlierPage = `http://127.0.0.1:${port}/${earlier.url.split("/").at(-1)}`;
   await browser(earlierPage, cancel);
@@ -236,8 +245,66 @@ test("a tagged node needs an explicitly allowed login", async () => {
   expect(keykong(["prompt", "web", "--allow", owner]).code).toBe(0);
 });
 
+test("a field named action is a value, not a page control", async () => {
+  const port = await configureWeb();
+  const { process, url } = await startRequest(join(directory, "app.env"), {
+    fields: [{ id: "action", label: "Action", type: "text" }],
+  });
+
+  await browser(`http://127.0.0.1:${port}/${url.split("/").at(-1)}`, {
+    method: "POST",
+    body: new URLSearchParams([["action", "cancel"], ["_action", "submit"]]),
+  });
+
+  expect(await process.exited).toBe(0);
+  expect(await new Response(process.stdout).text()).toBe(
+    '{"status":"completed","values":{"action":"cancel"}}\n',
+  );
+});
+
+test("a stalled browser submission cannot hold the request past its deadline", async () => {
+  const port = await configureWeb();
+  const target = join(directory, "app.env");
+  await writeFile(target, "");
+  const { process, url } = await startRequest(target, { deadlineMS: 1_500 });
+  const stalled = browser(`http://127.0.0.1:${port}/${url.split("/").at(-1)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new ReadableStream({
+      start: (controller) => controller.enqueue(new TextEncoder().encode("environment=")),
+    }),
+  }).catch(() => undefined);
+
+  expect(await process.exited).toBe(1);
+  expect(await new Response(process.stdout).text()).toBe(
+    '{"status":"expired","values":{}}\n',
+  );
+  await stalled;
+});
+
+test("invalid settings are reported until a prompt switch replaces them", async () => {
+  await mkdir(join(directory, "config", "keykong"), { recursive: true });
+  await writeFile(
+    join(directory, "config", "keykong", "web-prompt.json"),
+    '{"url":"https://wukong.example.ts.net/keykong","port":0,"allow":"owner@example.com"}',
+  );
+
+  const shown = keykong(["prompt"]);
+
+  expect(shown.code).toBe(1);
+  expect(JSON.parse(shown.stdout).error.code).toBe("PROMPT_FAILED");
+  expect(keykong(["prompt", "native"]).stdout).toBe('{"prompt":"native"}\n');
+  expect(keykong(["prompt"]).stdout).toBe('{"prompt":"native"}\n');
+});
+
 test("prompt native removes the Tailscale mount", async () => {
   await configureWeb();
+  await writeFile(
+    join(directory, "serve-status.json"),
+    JSON.stringify({
+      Web: { "wukong.example.ts.net:443": { Handlers: { "/keykong": {} } } },
+    }),
+  );
 
   const native = keykong(["prompt", "native"]);
 

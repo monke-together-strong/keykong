@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { Execution } from "./command";
 import type { Deadline } from "./deadline";
 import { KeyKongError } from "./errors";
@@ -10,12 +11,27 @@ import {
 const mountPath = "/keykong";
 const usage = "usage: keykong prompt [native|web [--allow <login>]]";
 
+const nodeStatusSchema = z.object({
+  Self: z.object({
+    DNSName: z.string().min(1),
+    UserID: z.number(),
+    Tags: z.array(z.string()).optional(),
+  }),
+  User: z.record(z.string(), z.object({ LoginName: z.string() })).optional(),
+});
+
+const serveStatusSchema = z.object({
+  Web: z
+    .record(z.string(), z.object({ Handlers: z.record(z.string(), z.unknown()) }))
+    .optional(),
+});
+
 export async function promptCommand(
   args: string[],
   deadline: Deadline,
 ): Promise<Execution> {
-  const settings = await readWebPromptSettings();
   if (args.length === 1) {
+    const settings = await readWebPromptSettings();
     return {
       result: settings
         ? { prompt: "web", url: settings.url }
@@ -24,13 +40,14 @@ export async function promptCommand(
     };
   }
   if (args.length === 2 && args[1] === "native") {
-    if (settings) {
+    // Check Tailscale itself so an interrupted switch can be finished.
+    if (Bun.which("tailscale") && (await mounted(deadline))) {
       await tailscale(
         ["serve", "--https=443", "--set-path", mountPath, "off"],
         deadline,
       );
-      await removeWebPromptSettings();
     }
+    await removeWebPromptSettings();
     return { result: { prompt: "native" }, exitCode: 0 };
   }
   if (
@@ -46,7 +63,8 @@ export async function promptCommand(
         2,
       );
     }
-    const port = settings?.port ?? freePort();
+    const previous = await readWebPromptSettings().catch(() => undefined);
+    const port = previous?.port ?? freePort();
     await tailscale(
       [
         "serve",
@@ -66,31 +84,45 @@ export async function promptCommand(
   throw new KeyKongError("CLI_USAGE", usage, 2);
 }
 
-async function tailscaleNode(
-  deadline: Deadline,
-): Promise<{ host: string; owner?: string }> {
-  const output = await tailscale(["status", "--json"], deadline);
-  let status: {
-    Self?: { DNSName?: string; UserID?: number; Tags?: string[] };
-    User?: Record<string, { LoginName?: string }>;
+async function tailscaleNode(deadline: Deadline) {
+  const { Self, User } = await tailscaleJSON(
+    ["status", "--json"],
+    nodeStatusSchema,
+    deadline,
+  );
+  return {
+    host: Self.DNSName.replace(/\.$/, ""),
+    owner: Self.Tags?.length ? undefined : User?.[Self.UserID]?.LoginName,
   };
+}
+
+async function mounted(deadline: Deadline) {
+  const { Web = {} } = await tailscaleJSON(
+    ["serve", "status", "--json"],
+    serveStatusSchema,
+    deadline,
+  );
+  return Object.values(Web).some(({ Handlers }) => mountPath in Handlers);
+}
+
+async function tailscaleJSON<Schema extends z.ZodType>(
+  args: string[],
+  schema: Schema,
+  deadline: Deadline,
+): Promise<z.infer<Schema>> {
+  const output = await tailscale(args, deadline);
+  let parsed: z.ZodSafeParseResult<z.infer<Schema>> | undefined;
   try {
-    status = JSON.parse(output);
-  } catch {
-    status = {};
-  }
-  const host = status.Self?.DNSName?.replace(/\.$/, "");
-  if (!host) {
+    parsed = schema.safeParse(JSON.parse(output));
+  } catch {}
+  if (!parsed?.success) {
     throw new KeyKongError(
       "PROMPT_FAILED",
-      "tailscale did not report this node's name",
+      `tailscale ${args.join(" ")} returned unexpected output`,
       1,
     );
   }
-  const owner = status.Self?.Tags?.length
-    ? undefined
-    : status.User?.[String(status.Self?.UserID)]?.LoginName;
-  return { host, owner };
+  return parsed.data;
 }
 
 function freePort(): number {
