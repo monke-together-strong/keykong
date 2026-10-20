@@ -293,6 +293,21 @@ test("a stalled browser submission cannot delay an accepted one", async () => {
   await stalled;
 });
 
+test("prompt web moves off a port another program took", async () => {
+  const port = await configureWeb();
+  const squatter = Bun.serve({
+    hostname: "127.0.0.1",
+    port,
+    fetch: () => new Response(),
+  });
+
+  try {
+    expect(await configureWeb()).not.toBe(port);
+  } finally {
+    squatter.stop(true);
+  }
+});
+
 test("invalid settings are reported until a prompt switch replaces them", async () => {
   await mkdir(join(directory, "config", "keykong"), { recursive: true });
   await writeFile(

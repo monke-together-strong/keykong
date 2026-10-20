@@ -64,10 +64,8 @@ export async function promptCommand(
         2,
       );
     }
-    const previous = await deadline.run(
-      readWebPromptSettings().catch(() => undefined),
-    );
-    const port = previous?.port ?? freePort();
+    // A fresh port lets a rerun recover when another program takes the saved one.
+    const port = freePort();
     await tailscale(
       [
         "serve",

@@ -41,7 +41,8 @@ keykong prompt native                       # switch back
 It needs Tailscale HTTPS and permission to change Serve, for example
 `sudo tailscale set --operator=$USER`. Bookmark the URL: while a request waits,
 it redirects to that request's page, which `keykong request` also prints to
-standard error.
+standard error. If the bookmark opens another service, rerun `keykong prompt web`
+to move Key Kong to a free port.
 
 ## Development
 
