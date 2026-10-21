@@ -6,13 +6,9 @@ import { z } from "zod";
 import type { Deadline } from "./deadline";
 import { KeyKongError } from "./errors";
 import { requestLimits } from "./limits";
-import type {
-  Delivery,
-  PromptResponse,
-  Request,
-  ResponseValue,
-} from "./types";
+import type { PromptResponse, Request, ResponseValue } from "./types";
 import { validateSubmission } from "./validation";
+import { form, page } from "./web-prompt-page";
 
 export const mountPath = "/keykong";
 
@@ -175,88 +171,3 @@ async function listen(
     await deadline.run(Bun.sleep(250));
   }
 }
-
-function form(request: Request, error?: string): string {
-  const fields = request.fields.map((field) => {
-    const name = Bun.escapeHTML(field.id);
-    const label = Bun.escapeHTML(field.label);
-    if (field.type === "multi_select") {
-      const options = field.options!.map((option) =>
-        `<label class="option"><input type="checkbox" name="${name}" value="${
-          Bun.escapeHTML(option.value)
-        }"> ${Bun.escapeHTML(option.label)}</label>`
-      );
-      return `<fieldset><legend>${label}</legend>${options.join("")}</fieldset>`;
-    }
-    if (field.type === "select") {
-      const options = field.options!.map((option) =>
-        `<option value="${Bun.escapeHTML(option.value)}">${Bun.escapeHTML(option.label)}</option>`
-      );
-      return `<label>${label}<select name="${name}" required>` +
-        `<option value="" disabled selected hidden>Choose…</option>${
-          options.join("")
-        }</select></label>`;
-    }
-    const input = field.type === "secret"
-      ? `type="password" name="${name}" autocomplete="new-password"`
-      : `type="text" name="${name}" autocomplete="off"`;
-    return `<label>${label}<input ${input} required spellcheck="false" autocapitalize="off"></label>`;
-  });
-  const deliveries = request.deliveries.length === 0 ? "" : `<section><h2>Delivery</h2><ul>${
-    request.deliveries.map((delivery) => `<li>${describe(delivery)}</li>`)
-      .join("")
-  }</ul></section>`;
-  return `<form method="post"><h1>${Bun.escapeHTML(request.title)}</h1>${
-    error ? `<p role="alert">${Bun.escapeHTML(error)}</p>` : ""
-  }${fields.join("")}${deliveries}<div class="actions">` +
-    `<button name="${control}" value="submit">Submit</button>` +
-    `<button name="${control}" value="cancel" formnovalidate>Cancel</button>` +
-    `</div></form>`;
-}
-
-function describe(delivery: Delivery): string {
-  const path = `<code>${Bun.escapeHTML(delivery.path)}</code>`;
-  if (delivery.operation === "set_env") {
-    return `Set <code>${Bun.escapeHTML(delivery.key)}</code> in ${path} from ${
-      Bun.escapeHTML(delivery.field)
-    }`;
-  }
-  const template = `<code>${Bun.escapeHTML(delivery.template)}</code>`;
-  return delivery.operation === "insert_line"
-    ? `Insert at line ${delivery.line} of ${path}: ${template}`
-    : `Append to ${path}: ${template}`;
-}
-
-function page(status: number, body: string): Response {
-  return new Response(
-    `<!doctype html><html lang="en"><meta charset="utf-8">` +
-      `<meta name="viewport" content="width=device-width, initial-scale=1">` +
-      `<title>Key Kong</title><style>${style}</style><main>${body}</main></html>`,
-    {
-      status,
-      headers: {
-        "Cache-Control": "no-store",
-        "Content-Security-Policy":
-          "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
-        "Content-Type": "text/html; charset=utf-8",
-        // Browsers send `Origin: null` with form posts under `no-referrer`.
-        "Referrer-Policy": "same-origin",
-      },
-    },
-  );
-}
-
-
-const style = `
-:root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }
-main { max-width: 32rem; margin: 2rem auto; padding: 0 1rem; }
-label, fieldset { display: block; margin: 0 0 1rem; }
-label.option { margin: 0.25rem 0; }
-input:not([type=checkbox]), select { display: block; box-sizing: border-box; width: 100%; margin-top: 0.25rem; padding: 0.5rem; font: inherit; }
-fieldset { border: 1px solid #8886; border-radius: 0.5rem; }
-h2 { font-size: 1rem; }
-code { overflow-wrap: anywhere; }
-[role=alert] { color: #c33; }
-.actions { display: flex; gap: 0.5rem; }
-button { padding: 0.5rem 1rem; font: inherit; }
-`;
