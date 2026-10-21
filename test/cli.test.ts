@@ -1355,41 +1355,44 @@ describe("built CLI response request", () => {
     expect(await readFile(target, "utf8")).toBe("one\n");
   });
 
-  test("delivery inherits the caller sandbox", async () => {
-    const target = join(directory, "sandbox-target.txt");
-    const profile = join(directory, "sandbox.profile");
-    await writeFile(target, "unchanged\n");
-    await writeFile(
-      profile,
-      [
-        "(version 1)",
-        "(deny default)",
-        "(allow process*)",
-        "(allow file-read*)",
-        "(allow sysctl-read)",
-      ].join("\n"),
-    );
+  test.skipIf(process.platform !== "darwin")(
+    "delivery inherits the caller macOS sandbox",
+    async () => {
+      const target = join(directory, "sandbox-target.txt");
+      const profile = join(directory, "sandbox.profile");
+      await writeFile(target, "unchanged\n");
+      await writeFile(
+        profile,
+        [
+          "(version 1)",
+          "(deny default)",
+          "(allow process*)",
+          "(allow file-read*)",
+          "(allow sysctl-read)",
+        ].join("\n"),
+      );
 
-    const result = Bun.spawnSync(
-      ["/usr/bin/sandbox-exec", "-f", profile, cli, "request", "-"],
-      {
-        stdin: new TextEncoder().encode(deliveryRequest(target)),
-        stdout: "pipe",
-        stderr: "pipe",
-        env: {
-          ...Bun.env,
-          KEY_KONG_PROMPT_EXECUTABLE: fakePrompt,
-          KEY_KONG_FAKE_MODE: "submit",
+      const result = Bun.spawnSync(
+        ["/usr/bin/sandbox-exec", "-f", profile, cli, "request", "-"],
+        {
+          stdin: new TextEncoder().encode(deliveryRequest(target)),
+          stdout: "pipe",
+          stderr: "pipe",
+          env: {
+            ...Bun.env,
+            KEY_KONG_PROMPT_EXECUTABLE: fakePrompt,
+            KEY_KONG_FAKE_MODE: "submit",
+          },
         },
-      },
-    );
+      );
 
-    expect(result.exitCode).toBe(2);
-    expect(JSON.parse(result.stdout.toString()).error.code).toBe(
-      "INVALID_REQUEST",
-    );
-    expect(await readFile(target, "utf8")).toBe("unchanged\n");
-  });
+      expect(result.exitCode).toBe(2);
+      expect(JSON.parse(result.stdout.toString()).error.code).toBe(
+        "INVALID_REQUEST",
+      );
+      expect(await readFile(target, "utf8")).toBe("unchanged\n");
+    },
+  );
 
   test("invalid helper output becomes a machine-readable prompt failure", () => {
     const result = run(["request", "-"], {
