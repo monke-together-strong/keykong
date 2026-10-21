@@ -28,8 +28,9 @@ export class Deadline {
         work,
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => {
-            onExpire?.();
+            // Cancellation can settle work, so publish expiry first.
             reject(new DeadlineExpired());
+            onExpire?.();
           }, remaining);
         }),
       ]);
