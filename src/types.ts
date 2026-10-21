@@ -91,3 +91,7 @@ export interface Result {
   failedDeliveries?: string[];
   error?: { code: ErrorCode; message: string };
 }
+
+export type PromptSelection =
+  | { prompt: "native" }
+  | { prompt: "web"; url: string };

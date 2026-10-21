@@ -2,6 +2,7 @@ import packageMetadata from "../package.json";
 import { requestCommand, type Execution } from "./command";
 import { Deadline, DeadlineExpired } from "./deadline";
 import { KeyKongError } from "./errors";
+import { promptCommand } from "./prompt-command";
 import { requestSchema } from "./schema";
 
 const version = packageMetadata.version;
@@ -9,6 +10,7 @@ const help = `Key Kong ${version}
 
 Usage:
   keykong request <file|->
+  keykong prompt [native|web [--allow <login>]]
   keykong schema
   keykong --help
   keykong --version
@@ -66,12 +68,16 @@ const workDeadline = new Deadline(configuredTimeout - outputMarginMS);
 
 let execution: Execution;
 try {
-  execution = await requestCommand(args, workDeadline);
+  execution = args[0] === "prompt"
+    ? await promptCommand(args, workDeadline)
+    : await requestCommand(args, workDeadline);
 } catch (error) {
   execution = failure(error);
 }
 const output = `${JSON.stringify(execution.result)}\n`;
-const diagnostic = execution.result.status === "expired"
+const diagnostic = !("status" in execution.result)
+  ? undefined
+  : execution.result.status === "expired"
   ? "request deadline expired"
   : execution.result.error?.message;
 try {
