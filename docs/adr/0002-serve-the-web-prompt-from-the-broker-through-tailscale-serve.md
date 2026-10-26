@@ -28,6 +28,6 @@ directly and set that header themselves; like other local software, they are
 outside the threat model.
 
 This was chosen over hosting Requests in a registered web application such as
-LFV. That design needed host registration, credentials, a versioned exchange
-protocol, and placed submitted secrets inside a much larger application, only
-to obtain a URL that Tailscale Serve provides directly.
+Monke See. That design needed host registration, credentials, a versioned
+exchange protocol, and placed submitted secrets inside a much larger
+application, only to obtain a URL that Tailscale Serve provides directly.
