@@ -36,7 +36,7 @@ _Avoid_: Input adapter, provider, broker, native adapter
 The Prompt Adapter that serves a request's form from the Broker process while
 the request waits, reached through Tailscale Serve by one allowed Tailscale
 login.
-_Avoid_: Web host, prompt server, LFV adapter
+_Avoid_: Web host, prompt server, Monke See adapter
 
 **Delivery Specification**:
 A request's description of its intended sink and the permitted operation that will deliver submitted values there.
