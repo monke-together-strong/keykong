@@ -790,6 +790,11 @@ final class MacOSInputFormTests: XCTestCase {
         return (window.firstResponder as? NSTextView)?.delegate as? NSControl
     }
 
+    private func displayedText(in view: NSView) -> [String] {
+        let ownText = (view as? NSTextField).map { [$0.stringValue] } ?? []
+        return ownText + view.subviews.flatMap { displayedText(in: $0) }
+    }
+
     private func keyDown(
         keyCode: UInt16,
         characters: String,
@@ -898,24 +903,22 @@ final class MacOSInputFormTests: XCTestCase {
         XCTAssertEqual(secretInput.secureTextField.stringValue, "highly-secret")
         XCTAssertEqual(secretInput.revealedTextField.stringValue, "")
         XCTAssertTrue(form.detailsView.isHidden)
+        form.detailsButton.performClick(nil)
+        XCTAssertFalse(form.detailsView.isHidden)
         XCTAssertEqual(
-            form.deliveryDetails,
+            displayedText(in: form.detailsView),
             [
-                """
-                /tmp/existing.env — append
-                Template:
-                TOKEN={{ api_token }}
-
-                """,
-                """
-                /tmp/settings — insert before line 2
-                Template:
-                credentials={{ api_token }}
-                """,
-                "/tmp/existing.env — set API_TOKEN from API token"
+                "Append to file",
+                "/tmp/existing.env",
+                "TOKEN={{ api_token }}",
+                "Insert before line 2",
+                "/tmp/settings",
+                "credentials={{ api_token }}",
+                "Set API_TOKEN from API token",
+                "/tmp/existing.env"
             ]
         )
-        XCTAssertFalse(form.deliveryDetails.joined().contains("highly-secret"))
+        XCTAssertFalse(displayedText(in: form.detailsView).joined().contains("highly-secret"))
         let appendTemplate = try XCTUnwrap(
             descendant(
                 "delivery-0-template",
@@ -925,8 +928,6 @@ final class MacOSInputFormTests: XCTestCase {
         XCTAssertEqual(appendTemplate.stringValue, "TOKEN={{ api_token }}")
         XCTAssertTrue(appendTemplate.isSelectable)
 
-        form.detailsButton.performClick(nil)
-        XCTAssertFalse(form.detailsView.isHidden)
         form.sendButton.performClick(nil)
 
         XCTAssertEqual(
@@ -960,8 +961,8 @@ final class MacOSInputFormTests: XCTestCase {
         ) { _ in }
 
         XCTAssertEqual(
-            form.deliveryDetails,
-            ["/tmp/existing.env — set VALUE from Decomposed"]
+            displayedText(in: form.detailsView),
+            ["Set VALUE from Decomposed", "/tmp/existing.env"]
         )
     }
 

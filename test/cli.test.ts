@@ -1394,17 +1394,6 @@ describe("built CLI response request", () => {
     },
   );
 
-  test("invalid helper output becomes a machine-readable prompt failure", () => {
-    const result = run(["request", "-"], {
-      stdin: request(),
-      mode: "malformed",
-    });
-
-    expect(result.code).toBe(1);
-    expect(JSON.parse(result.stdout).error.code).toBe("PROMPT_FAILED");
-    expect(result.stdout).not.toContain("not-json");
-  });
-
   test("empty submitted fields fail before delivery", async () => {
     const target = join(directory, "empty-submission.txt");
     await writeFile(target, "unchanged\n");

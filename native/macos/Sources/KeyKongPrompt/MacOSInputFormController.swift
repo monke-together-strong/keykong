@@ -73,7 +73,6 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
     let cancelButton: NSButton
     let detailsButton: NSButton
     let detailsView: NSStackView
-    let deliveryDetails: [String]
     private(set) var inputViews: [NSView] = []
     private(set) var errorLabels: [String: NSTextField] = [:]
 
@@ -88,9 +87,6 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
         request: PromptRequest,
         onComplete: @escaping (PromptOutcome) -> Void
     ) {
-        let deliveryDetails = request.deliveries.map {
-            Self.describe($0, fields: request.fields)
-        }
         let deliveryDetailViews = request.deliveries.enumerated().map {
             Self.makeDeliveryDetailView(
                 $0.element,
@@ -118,7 +114,6 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
             target: nil,
             action: nil
         )
-        self.deliveryDetails = deliveryDetails
         self.detailsView = NSStackView(views: deliveryDetailViews)
         super.init()
 
@@ -654,41 +649,6 @@ final class MacOSInputFormController: NSObject, NSWindowDelegate {
                     .forEach { $0.state = .off }
             }
         }
-    }
-
-    private static func describe(
-        _ delivery: PromptDelivery,
-        fields: [PromptField]
-    ) -> String {
-        switch delivery.operation {
-        case .append:
-            return templateDescription(
-                summary: "\(delivery.path) — append",
-                template: delivery.template
-            )
-        case .insertLine:
-            return templateDescription(
-                summary:
-                    "\(delivery.path) — insert before line \(delivery.line ?? 0)",
-                template: delivery.template
-            )
-        case .setEnv:
-            let field = delivery.field ?? ""
-            let label = fields.first {
-                $0.id.utf8.elementsEqual(field.utf8)
-            }?.label ?? field
-            return "\(delivery.path) — set \(delivery.key ?? "") from \(label)"
-        }
-    }
-
-    private static func templateDescription(
-        summary: String,
-        template: String?
-    ) -> String {
-        guard let template else {
-            return "\(summary)\nTemplate unavailable"
-        }
-        return "\(summary)\nTemplate:\n\(template)"
     }
 
     private static func makeDeliveryDetailView(
