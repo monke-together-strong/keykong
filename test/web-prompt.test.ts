@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import { once } from "node:events";
+import { request } from "node:http";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -269,18 +271,23 @@ test("a stalled browser submission cannot delay an accepted one", async () => {
   const port = await configureWeb();
   const { process, url } = await startRequest(join(directory, "app.env"), {
     fields: [{ id: "environment", label: "Environment", type: "text" }],
-    deadlineMS: 2_000,
+    deadlineMS: 900,
   });
   const page = `http://127.0.0.1:${port}/${url.split("/").at(-1)}`;
-  const stalled = browser(page, {
+  const stalled = request(page, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new ReadableStream({
-      start: (controller) => controller.enqueue(new TextEncoder().encode("environment=")),
-    }),
-  }).catch(() => undefined);
-  // Submit with well under a second of the request deadline left.
-  await Bun.sleep(1_100);
+    headers: {
+      "Tailscale-User-Login": owner,
+      Origin: origin,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Transfer-Encoding": "chunked",
+      Expect: "100-continue",
+    },
+  });
+  // The server closes the unfinished upload when the accepted request exits.
+  const closed = once(stalled, "close").catch(() => undefined);
+  stalled.flushHeaders();
+  await once(stalled, "continue");
 
   const submitted = await browser(page, {
     method: "POST",
@@ -292,7 +299,7 @@ test("a stalled browser submission cannot delay an accepted one", async () => {
   expect(await new Response(process.stdout).text()).toBe(
     '{"status":"completed","values":{"environment":"prod"}}\n',
   );
-  await stalled;
+  await closed;
 });
 
 test("a request reports a taken port, and prompt web moves off it", async () => {
