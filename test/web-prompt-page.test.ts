@@ -3,9 +3,10 @@ import { form, page } from "../src/web-prompt-page";
 
 test("request metadata stays text and only the nonce-authorized script can run", async () => {
   const hostile = `"><script>alert('injected')</script><img src=x onerror=alert(1)>`;
+  const title = `Request ${hostile}`;
   const response = page(200, form({
     id: "escaping",
-    title: hostile,
+    title,
     fields: [
       { id: "submit", label: hostile, type: "secret" },
       { id: "region", label: hostile, type: "select", options: [{ label: hostile, value: hostile }] },
@@ -13,10 +14,12 @@ test("request metadata stays text and only the nonce-authorized script can run",
     ],
     deliveries: [{ id: "delivery", path: hostile, operation: "append", template: hostile }],
   }));
+  let heading = "";
   const scripts: string[] = [];
   const imageSources: string[] = [];
   const options: string[] = [];
   const html = await new HTMLRewriter()
+    .on("h1", { text: (chunk) => { heading += chunk.text; } })
     .on("script", { element: (element) => { scripts.push(element.getAttribute("nonce") ?? ""); } })
     .on("img", { element: (element) => { imageSources.push(element.getAttribute("src") ?? ""); } })
     .on("option[value]:not([disabled])", { element: (element) => { options.push(element.getAttribute("value") ?? ""); } })
@@ -31,6 +34,6 @@ test("request metadata stays text and only the nonce-authorized script can run",
   expect(image.subarray(1, 4).toString()).toBe("PNG");
   expect(image.readUInt32BE(16)).toBe(176);
   expect(options).toEqual([Bun.escapeHTML(hostile)]);
-  expect(html).toContain(Bun.escapeHTML(hostile));
+  expect(heading).toBe(Bun.escapeHTML(title));
   expect(html).not.toContain(hostile);
 });
