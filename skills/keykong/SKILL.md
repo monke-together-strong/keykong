@@ -1,6 +1,6 @@
 ---
 name: keykong
-description: Secret boundary for user input. Use only when a workflow must ask the user to supply a secret, optionally delivering that user-entered value into an existing local file.
+description: "Ask the user to supply a secret through a safe boundary."
 ---
 
 # Key Kong
